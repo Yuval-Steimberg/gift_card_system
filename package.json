@@ -20,7 +20,8 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "db:migrate": "node scripts/db-migrate.mjs",
-    "db:seed": "node scripts/db-seed.mjs"
+    "db:seed": "node scripts/db-seed.mjs",
+    "verify:supabase": "node scripts/verify-supabase.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

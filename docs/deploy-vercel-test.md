@@ -27,6 +27,20 @@ activation runs, but nothing is charged.
 
    Alternatively, with the Supabase CLI: `supabase db push` then `psql "$DB_URL" -f supabase/seed.sql`.
 
+## Step 1.5 — Verify the database (one command, catches problems early)
+Before deploying, confirm the migrations + seed are correct and the atomic RPCs work against
+your live Supabase. Put `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in a local
+`.env.local` (or export them), then run:
+
+```bash
+npm run verify:supabase
+```
+
+It checks every required table, confirms the seed ran, then runs a real
+**activate → redeem → duplicate-guard → public-view** cycle on a throwaway card and asserts the
+`balance == SUM(ledger)` invariant — cleaning up after itself. Green ✅ means the production data
+layer is good to go; any ❌ names the exact table/RPC to fix.
+
 ## Step 2 — Deploy the app (Vercel)
 1. Vercel → **Add New → Project → Import** this GitHub repo.
 2. Framework preset auto-detects **Next.js**. Leave build/output defaults.
