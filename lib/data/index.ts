@@ -24,6 +24,16 @@ export function getStore(): GiftCardStore {
   if (isSupabaseConfigured()) {
     store = new SupabaseStore()
   } else {
+    if (process.env.NODE_ENV === 'production') {
+      // MemoryStore is per-instance and resets on cold start — unusable for a
+      // real/shared deployment. Warn loudly so a misconfigured deploy is obvious.
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[data] NODE_ENV=production but Supabase is not configured — using the in-memory ' +
+          'store. Data will NOT persist or be shared across instances. Set ' +
+          'NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for a real deployment.',
+      )
+    }
     store = new MemoryStore()
   }
   return store

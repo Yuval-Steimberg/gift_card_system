@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic'
 export default async function EmployeeLoginPage() {
   const user = await getCurrentUser()
   if (user) redirect('/employee')
-  const showDemo = !process.env.NEXT_PUBLIC_SUPABASE_URL
+  // Only advertise demo credentials in local dev — never on a public deployment.
+  const showDemo = process.env.NODE_ENV !== 'production' && !process.env.NEXT_PUBLIC_SUPABASE_URL
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">

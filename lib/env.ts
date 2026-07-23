@@ -14,6 +14,9 @@ const rawServerSchema = z.object({
   BUSINESS_TIMEZONE: z.string().default('Asia/Jerusalem'),
   CRON_SECRET: z.string().default('dev-cron-secret-change-me'),
   AUTH_SECRET: z.string().default('dev-auth-secret-change-me'),
+  // Overrides the demo staff password (used by the offline/demo auth layer).
+  // Set this on any publicly-reachable deployment so staff logins aren't 'password'.
+  AUTH_DEMO_PASSWORD: z.string().optional(),
 
   NEXT_PUBLIC_SUPABASE_URL: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),

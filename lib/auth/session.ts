@@ -49,7 +49,8 @@ export interface LoginResult {
  */
 export async function login(email: string, password: string): Promise<LoginResult> {
   const user = findDemoUserByEmail(email)
-  if (!user || password !== DEMO_PASSWORD) return { ok: false, message: 'פרטי התחברות שגויים' }
+  const expectedPassword = serverEnv().AUTH_DEMO_PASSWORD || DEMO_PASSWORD
+  if (!user || password !== expectedPassword) return { ok: false, message: 'פרטי התחברות שגויים' }
   if (!user.active) return { ok: false, message: 'החשבון מושבת' }
   const token = encode({ sub: user.id, exp: Math.floor(Date.now() / 1000) + MAX_AGE })
   cookies().set(COOKIE, token, {
