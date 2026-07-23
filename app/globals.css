@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   Just A Second — design tokens (values reused from the reference site,
+   see docs/just-website-repository-audit.md). Cream paper ground, forest
+   text, one confident orange. HSL to match shadcn conventions.
+   ========================================================================= */
+:root {
+  --background: 42 100% 98%; /* jas-cream  #FFFCF5 */
+  --foreground: 138 9% 22%; /* jas-forest #333D36 */
+  --card: 0 0% 100%;
+  --card-foreground: 138 9% 22%;
+  --primary: 29 80% 53%; /* jas-orange #E88225 */
+  --primary-foreground: 42 100% 98%;
+  --secondary: 105 22% 85%; /* jas-sage-2 #D6E1CF */
+  --secondary-foreground: 138 9% 22%;
+  --muted: 43 42% 87%; /* jas-cream-3 #ECE5D1 */
+  --muted-foreground: 140 4% 40%; /* jas-slate #626B65 */
+  --accent: 105 22% 73%; /* jas-sage #B5C9AD */
+  --accent-foreground: 138 9% 22%;
+  --destructive: 11 61% 44%; /* warm terracotta #B5452C */
+  --destructive-foreground: 42 100% 98%;
+  --success: 140 30% 38%;
+  --success-foreground: 42 100% 98%;
+  --warning: 35 85% 45%;
+  --warning-foreground: 42 100% 98%;
+  --border: 43 26% 82%; /* #DDD6C4 */
+  --input: 43 26% 82%;
+  --ring: 29 80% 53%;
+  --radius: 0.875rem; /* 14px */
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: 'rlig' 1, 'calt' 1;
+  min-height: 100vh;
+}
+
+/* Headings use Heebo heavy weights (Antidot is licensed + English-only). */
+h1,
+h2,
+h3 {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+}
+
+.eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Keep phone numbers / prices / codes LTR inside RTL text. */
+.ltr-embed {
+  direction: ltr;
+  unicode-bidi: embed;
+}
+
+/* Respect reduced-motion for all animation/transition. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessible focus ring on keyboard nav. */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
