@@ -47,12 +47,50 @@ export async function GET() {
     health.tables = probe
     health.migrationsRan = migrationsOk
     health.seedRan = seedOk
-    health.ok = migrationsOk && seedOk
+
+    // Exercise the actual admin read path so any adapter bug surfaces here
+    // (with the real message) instead of only as a page-level 500 digest.
+    const checks: Record<string, string> = {}
+    try {
+      const store = getStore()
+      const list = await store.listGiftCards({ limit: 5 })
+      checks.listGiftCards = `ok (${list.total} total)`
+    } catch (e) {
+      checks.listGiftCards = `ERROR: ${e instanceof Error ? e.message : String(e)}`
+    }
+    try {
+      const { getAdminStats } = await import('@/lib/gift-cards/admin-service')
+      const stats = await getAdminStats()
+      checks.adminStats = `ok (active=${stats.active})`
+    } catch (e) {
+      checks.adminStats = `ERROR: ${e instanceof Error ? e.message : String(e)}`
+    }
+    try {
+      const store = getStore()
+      const first = (await store.listGiftCards({ limit: 1 })).items[0]
+      if (first) {
+        await store.getLedger(first.id)
+        await store.getRedemptions(first.id)
+        await store.getAudit('gift_card', first.id)
+        await store.getDeliveryJobs(first.id)
+        checks.cardDetailQueries = 'ok'
+      } else {
+        checks.cardDetailQueries = 'skipped (no cards)'
+      }
+    } catch (e) {
+      checks.cardDetailQueries = `ERROR: ${e instanceof Error ? e.message : String(e)}`
+    }
+    health.checks = checks
+    const checksOk = Object.values(checks).every((v) => !v.startsWith('ERROR'))
+
+    health.ok = migrationsOk && seedOk && checksOk
     health.hint = !migrationsOk
-      ? 'A table is missing — run supabase/migrations/0001_init.sql, 0002_rls.sql, 0003_functions.sql in order.'
+      ? 'A table is missing — run supabase/setup.sql (or the 3 migrations in order).'
       : !seedOk
         ? 'Tables exist but are empty — run supabase/seed.sql.'
-        : 'Data layer healthy.'
+        : !checksOk
+          ? 'Tables are healthy but an admin query failed — see checks[] for the exact error.'
+          : 'Data layer healthy.'
     return NextResponse.json(health, { status: health.ok ? 200 : 500 })
   }
 
