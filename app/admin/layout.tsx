@@ -43,6 +43,23 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
         </div>
       </header>
+      {/* Mobile section nav — the sidebar is hidden below md, so give phones a
+          horizontally-scrollable nav row. */}
+      <nav className="border-b border-border bg-card md:hidden">
+        <div className="container flex gap-1 overflow-x-auto py-2">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
+
       <div className="container flex gap-8 py-8">
         <aside className="hidden w-48 shrink-0 md:block">
           <nav className="sticky top-8 space-y-1">

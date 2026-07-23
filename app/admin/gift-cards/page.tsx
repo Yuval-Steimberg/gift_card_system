@@ -60,7 +60,7 @@ export default async function GiftCardsAdminPage({
       </form>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-border bg-muted/40 text-start">
             <tr className="text-start text-muted-foreground">
               <th className="p-3 text-start font-medium">קוד</th>
@@ -74,22 +74,22 @@ export default async function GiftCardsAdminPage({
           <tbody>
             {items.map((c) => (
               <tr key={c.id} className="border-b border-border/60 last:border-0 hover:bg-muted/30">
-                <td className="p-3">
+                <td className="whitespace-nowrap p-3">
                   <Link href={`/admin/gift-cards/${c.id}`} className="font-mono text-primary hover:underline" dir="ltr">
                     {c.code}
                   </Link>
                 </td>
-                <td className="p-3">{c.recipientName}</td>
+                <td className="whitespace-nowrap p-3">{c.recipientName}</td>
                 <td className="p-3">
                   <StatusBadge status={c.status} />
                 </td>
-                <td className="p-3" dir="ltr" style={{ unicodeBidi: 'embed' }}>
+                <td className="whitespace-nowrap p-3" dir="ltr" style={{ unicodeBidi: 'embed' }}>
                   {formatMoney(c.balanceMinor, c.currency)}
                 </td>
-                <td className="p-3 text-muted-foreground" dir="ltr" style={{ unicodeBidi: 'embed' }}>
+                <td className="whitespace-nowrap p-3 text-muted-foreground" dir="ltr" style={{ unicodeBidi: 'embed' }}>
                   {formatMoney(c.initialAmountMinor, c.currency)}
                 </td>
-                <td className="p-3 text-muted-foreground" dir="ltr">
+                <td className="whitespace-nowrap p-3 text-muted-foreground" dir="ltr">
                   {c.createdAt.slice(0, 10)}
                 </td>
               </tr>
