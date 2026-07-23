@@ -49,8 +49,10 @@ export interface LoginResult {
  */
 export async function login(email: string, password: string): Promise<LoginResult> {
   const user = findDemoUserByEmail(email)
-  const expectedPassword = serverEnv().AUTH_DEMO_PASSWORD || DEMO_PASSWORD
-  if (!user || password !== expectedPassword) return { ok: false, message: 'פרטי התחברות שגויים' }
+  // Trim to tolerate accidental trailing whitespace/newlines in the env var or
+  // the typed value (common when pasting a password into a Vercel env field).
+  const expectedPassword = (serverEnv().AUTH_DEMO_PASSWORD || DEMO_PASSWORD).trim()
+  if (!user || password.trim() !== expectedPassword) return { ok: false, message: 'פרטי התחברות שגויים' }
   if (!user.active) return { ok: false, message: 'החשבון מושבת' }
   const token = encode({ sub: user.id, exp: Math.floor(Date.now() / 1000) + MAX_AGE })
   cookies().set(COOKIE, token, {

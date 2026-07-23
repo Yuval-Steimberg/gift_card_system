@@ -26,6 +26,10 @@ export async function GET() {
       PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER ?? 'mock',
       EMAIL_PROVIDER: process.env.EMAIL_PROVIDER ?? 'log',
       APP_BASE_URL: Boolean(process.env.APP_BASE_URL),
+      // Which staff password applies on THIS running deployment:
+      //  true  -> log in with your AUTH_DEMO_PASSWORD value
+      //  false -> log in with the literal password: "password"
+      AUTH_DEMO_PASSWORD_SET: Boolean(process.env.AUTH_DEMO_PASSWORD),
     },
   }
 
