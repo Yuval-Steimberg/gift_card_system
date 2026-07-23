@@ -16,6 +16,8 @@ export async function GET() {
   const usingSupabase = isSupabaseConfigured()
   const health: Record<string, unknown> = {
     ok: false,
+    // Bump this marker when deploying a fix so you can confirm the LIVE build.
+    build: 'auth-decoupled-v1',
     store: usingSupabase ? 'supabase' : 'memory',
     env: {
       NEXT_PUBLIC_SUPABASE_URL: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
@@ -51,6 +53,16 @@ export async function GET() {
     // Exercise the actual admin read path so any adapter bug surfaces here
     // (with the real message) instead of only as a page-level 500 digest.
     const checks: Record<string, string> = {}
+    // Auth path: serverEnv() must not throw (this was the admin-500 root cause).
+    try {
+      const { serverEnv } = await import('@/lib/env')
+      serverEnv()
+      const { getCurrentUser } = await import('@/lib/auth/session')
+      await getCurrentUser()
+      checks.authLayer = 'ok'
+    } catch (e) {
+      checks.authLayer = `ERROR: ${e instanceof Error ? e.message : String(e)}`
+    }
     try {
       const store = getStore()
       const list = await store.listGiftCards({ limit: 5 })
