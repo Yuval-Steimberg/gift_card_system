@@ -7,6 +7,9 @@ import { getSettings } from '@/lib/gift-cards/service'
 import { formatMoney } from '@/lib/money'
 import { CreditCard, Gift, Mail, ShieldCheck } from '@/components/icons'
 
+// Reads live settings at request time; do not prerender at build.
+export const dynamic = 'force-dynamic'
+
 export default async function HomePage() {
   const settings = await getSettings()
   return (

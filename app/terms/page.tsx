@@ -2,6 +2,10 @@ import { SiteHeader } from '@/components/site/site-header'
 import { SiteFooter } from '@/components/site/site-footer'
 import { getSettings } from '@/lib/gift-cards/service'
 
+// Reads live settings from the store at request time — never prerender at build
+// (build must not depend on runtime env/DB).
+export const dynamic = 'force-dynamic'
+
 export default async function TermsPage() {
   const s = await getSettings()
   return (
