@@ -11,6 +11,9 @@ export function getPaymentProvider(): PaymentProvider {
   if (instance) return instance
   const env = serverEnv()
   if (env.PAYMENT_PROVIDER === 'grow') {
+    if (!env.GROW_API_KEY || !env.GROW_API_SECRET) {
+      throw new Error('GROW_API_KEY and GROW_API_SECRET are required when PAYMENT_PROVIDER=grow.')
+    }
     instance = new GrowPaymentProvider({
       apiUrl: env.GROW_API_URL ?? 'https://restapi.grow.link',
       apiKey: env.GROW_API_KEY!,

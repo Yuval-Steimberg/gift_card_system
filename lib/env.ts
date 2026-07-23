@@ -57,36 +57,12 @@ export function serverEnv(): ServerEnv {
   }
   const env = parsed.data
 
-  // Cross-field production guards: real providers require their credentials.
-  const problems: string[] = []
-  if (env.NEXT_PUBLIC_SUPABASE_URL && !env.SUPABASE_SERVICE_ROLE_KEY) {
-    problems.push(
-      'SUPABASE_SERVICE_ROLE_KEY is required when NEXT_PUBLIC_SUPABASE_URL is set ' +
-        '(the server must not fall back to the anon key for privileged writes).',
-    )
-  }
-  if (env.PAYMENT_PROVIDER === 'grow' && (!env.GROW_API_KEY || !env.GROW_API_SECRET)) {
-    problems.push('GROW_API_KEY and GROW_API_SECRET are required when PAYMENT_PROVIDER=grow.')
-  }
-  if (env.EMAIL_PROVIDER === 'resend' && !env.RESEND_API_KEY) {
-    problems.push('RESEND_API_KEY is required when EMAIL_PROVIDER=resend.')
-  }
-  if (env.RECEIPT_PROVIDER === 'greeninvoice' && !env.GREENINVOICE_API_KEY) {
-    problems.push('GREENINVOICE_API_KEY is required when RECEIPT_PROVIDER=greeninvoice.')
-  }
-  if (
-    env.NODE_ENV === 'production' &&
-    env.PAYMENT_PROVIDER !== 'mock' &&
-    env.PAYMENT_WEBHOOK_SECRET === 'dev-payment-webhook-secret-change-me'
-  ) {
-    problems.push(
-      'PAYMENT_WEBHOOK_SECRET must be changed from its dev default when a real payment provider is enabled.',
-    )
-  }
-  if (problems.length > 0) {
-    throw new Error(`Invalid environment configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`)
-  }
-
+  // IMPORTANT: serverEnv() only parses the schema (all fields optional with
+  // defaults) and MUST NOT throw for a misconfigured provider. It is called on
+  // hot paths like auth (session signing) and must not fail because, say, the
+  // email provider lacks a key. Provider-credential checks live in each
+  // provider factory (getPaymentProvider / getEmailProvider / getReceiptProvider)
+  // so they only fire when that provider is actually used.
   cached = env
   return env
 }

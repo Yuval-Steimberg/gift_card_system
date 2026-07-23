@@ -10,7 +10,10 @@ export function getEmailProvider(): EmailProvider {
   if (instance) return instance
   const env = serverEnv()
   if (env.EMAIL_PROVIDER === 'resend') {
-    instance = new ResendEmailProvider(env.RESEND_API_KEY!, env.EMAIL_FROM)
+    if (!env.RESEND_API_KEY) {
+      throw new Error('RESEND_API_KEY is required when EMAIL_PROVIDER=resend (or set EMAIL_PROVIDER=log).')
+    }
+    instance = new ResendEmailProvider(env.RESEND_API_KEY, env.EMAIL_FROM)
   } else {
     instance = new LogEmailProvider()
   }

@@ -10,7 +10,10 @@ export function getReceiptProvider(): ReceiptProvider {
   if (instance) return instance
   const env = serverEnv()
   if (env.RECEIPT_PROVIDER === 'greeninvoice') {
-    instance = new GreenInvoiceReceiptProvider(env.GREENINVOICE_API_KEY!, env.GREENINVOICE_API_SECRET ?? '')
+    if (!env.GREENINVOICE_API_KEY) {
+      throw new Error('GREENINVOICE_API_KEY is required when RECEIPT_PROVIDER=greeninvoice.')
+    }
+    instance = new GreenInvoiceReceiptProvider(env.GREENINVOICE_API_KEY, env.GREENINVOICE_API_SECRET ?? '')
   } else {
     instance = new MockReceiptProvider()
   }
