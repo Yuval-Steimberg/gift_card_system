@@ -58,7 +58,9 @@ layer is good to go; any ❌ names the exact table/RPC to fix.
    | `AUTH_DEMO_PASSWORD` | a private staff password (replaces `password`) |
    | `CRON_SECRET` | any long random string |
    | `BUSINESS_TIMEZONE` | `Asia/Jerusalem` |
-   | `EMAIL_PROVIDER` | `log` (see “Emails” below) |
+   | `EMAIL_PROVIDER` | `resend` (so recipients get real gift emails — see Step 2.5) |
+   | `RESEND_API_KEY` | from Resend (Step 2.5) |
+   | `EMAIL_FROM` | `Just A Second <gifts@yourdomain.com>` (a verified Resend sender) |
 
    > Set `APP_BASE_URL` **after** the first deploy if you don’t know the URL yet, then redeploy.
    > It must match the live origin so the confirmation/recipient links and the webhook URL are correct.
@@ -66,6 +68,31 @@ layer is good to go; any ❌ names the exact table/RPC to fix.
 4. Deploy. The included `vercel.json` schedules the delivery worker (`/api/cron/deliver`)
    every 5 minutes; Vercel auto-authorizes it with your `CRON_SECRET`. (On the Hobby plan cron
    frequency may be limited — immediate delivery doesn’t need cron; only *scheduled* sends do.)
+
+## Step 2.5 — Set up real emails (Resend)
+So recipients actually receive their gift card (not just a preview file), use Resend:
+
+1. Create a free account at [resend.com](https://resend.com) → **API Keys → Create** →
+   copy the key into `RESEND_API_KEY`.
+2. **Verify a sending domain** (Resend → Domains → add your domain, add the DNS records it
+   shows). Then set `EMAIL_FROM` to an address on that domain, e.g.
+   `Just A Second <gifts@yourdomain.com>`.
+3. Test it end to end **before** deploying — with `RESEND_API_KEY` + `EMAIL_FROM` in `.env.local`:
+
+   ```bash
+   npm run verify:email you@yourdomain.com
+   ```
+
+   A green ✓ means gift + confirmation emails will send. A ✗ prints Resend’s exact reason
+   (almost always an unverified `from` domain).
+
+> **Quick test without your own domain:** you can set
+> `EMAIL_FROM='Just A Second <onboarding@resend.dev>'` and Resend will send — but only to the
+> email address that owns your Resend account. Verify a real domain to email arbitrary recipients.
+
+If you’d rather skip email for the first round, set `EMAIL_PROVIDER=log` instead; recipients then
+open their card via the confirmation-page link (no email is sent — the log adapter writes to the
+server’s ephemeral filesystem on Vercel).
 
 ## Step 3 — Verify the live deployment
 1. Open `https://your-app.vercel.app` → **רכישת שובר** → complete the steps → on the mock
@@ -89,11 +116,14 @@ Supabase env var or a migration that didn’t run.
 `finance@justasecond.example`.
 
 ## Emails
-`EMAIL_PROVIDER=log` writes email previews to the server filesystem, which is **ephemeral on
-Vercel** — recipients won’t receive an actual email. Testers can still open the card from the
-confirmation page / the `/gift/<token>` link. For **real** emails, set `EMAIL_PROVIDER=resend`,
-`RESEND_API_KEY`, and `EMAIL_FROM` (Resend requires a verified sending domain; for a quick test
-you can only send to your own verified address until the domain is verified).
+This guide uses **Resend** (`EMAIL_PROVIDER=resend`) so recipients get real gift emails — set up
+and tested in Step 2.5 via `npm run verify:email`. Resend requires a verified sending domain; until
+one is verified you can only send to the address that owns the Resend account (or use the
+`onboarding@resend.dev` sender for a quick self-test).
+
+The alternative, `EMAIL_PROVIDER=log`, writes previews to the server filesystem — **ephemeral on
+Vercel**, so recipients get nothing; they’d open the card from the confirmation-page link instead.
+Good for a first smoke test, not for a real recipient experience.
 
 ## Important caveats for a test share
 - This is a **test build**: mock payments, demo staff accounts, and unverified accounting/legal.
