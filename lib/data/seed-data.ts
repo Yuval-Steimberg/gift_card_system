@@ -40,13 +40,13 @@ const STORE_ID = 'store-tlv'
 export const DEMO_TEMPLATES: GiftCardTemplate[] = [
   {
     id: 'tpl-celebration',
-    name: 'חגיגה כללית',
+    name: 'חגיגה',
     occasion: 'celebration',
     language: 'he',
     coverImageUrl: null,
-    backgroundColor: '#333D36',
-    textColor: '#FFFCF5',
-    accentColor: '#E88225',
+    backgroundColor: '#333D36', // forest
+    textColor: '#FFFCF5', // cream
+    accentColor: '#E88225', // orange
     isActive: true,
     isDefault: true,
     createdAt: iso(-120),
@@ -57,9 +57,9 @@ export const DEMO_TEMPLATES: GiftCardTemplate[] = [
     occasion: 'birthday',
     language: 'he',
     coverImageUrl: null,
-    backgroundColor: '#B5C9AD',
-    textColor: '#333D36',
-    accentColor: '#E88225',
+    backgroundColor: '#B5C9AD', // sage
+    textColor: '#333D36', // forest
+    accentColor: '#C96A17', // pressed orange
     isActive: true,
     isDefault: false,
     createdAt: iso(-120),
@@ -70,22 +70,48 @@ export const DEMO_TEMPLATES: GiftCardTemplate[] = [
     occasion: 'holiday',
     language: 'he',
     coverImageUrl: null,
-    backgroundColor: '#D6E1CF',
-    textColor: '#333D36',
-    accentColor: '#C96A17',
+    backgroundColor: '#8FA688', // sage-3 (deeper green)
+    textColor: '#FFFCF5', // cream
+    accentColor: '#F4A866', // soft orange
+    isActive: true,
+    isDefault: false,
+    createdAt: iso(-120),
+  },
+  {
+    id: 'tpl-thankyou',
+    name: 'תודה',
+    occasion: 'general',
+    language: 'he',
+    coverImageUrl: null,
+    backgroundColor: '#F6F1E4', // warm paper
+    textColor: '#333D36', // forest
+    accentColor: '#E88225', // orange
+    isActive: true,
+    isDefault: false,
+    createdAt: iso(-120),
+  },
+  {
+    id: 'tpl-love',
+    name: 'מכל הלב',
+    occasion: 'celebration',
+    language: 'he',
+    coverImageUrl: null,
+    backgroundColor: '#4A524D', // deep slate
+    textColor: '#FFFCF5', // cream
+    accentColor: '#F4A866', // soft orange
     isActive: true,
     isDefault: false,
     createdAt: iso(-120),
   },
   {
     id: 'tpl-general-en',
-    name: 'General (English)',
+    name: 'With Love',
     occasion: 'general',
     language: 'en',
     coverImageUrl: null,
-    backgroundColor: '#FFFCF5',
-    textColor: '#333D36',
-    accentColor: '#E88225',
+    backgroundColor: '#FFFCF5', // cream
+    textColor: '#333D36', // forest
+    accentColor: '#E88225', // orange
     isActive: true,
     isDefault: false,
     createdAt: iso(-120),
@@ -100,7 +126,7 @@ function defaultSettings(): SystemSettings {
     storeAddress: 'מנחם בגין 34, תל אביב',
     currency: 'ILS',
     timezone: 'Asia/Jerusalem',
-    presetAmountsMinor: [toMinor(100), toMinor(200), toMinor(300), toMinor(500)],
+    presetAmountsMinor: [toMinor(100), toMinor(250), toMinor(500), toMinor(1000)],
     minAmountMinor: toMinor(50),
     maxAmountMinor: toMinor(5000),
     allowCustomAmount: true,

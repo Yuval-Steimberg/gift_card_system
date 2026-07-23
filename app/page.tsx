@@ -44,7 +44,7 @@ export default async function HomePage() {
               amountMinor={settings.presetAmountsMinor[1] ?? 20000}
               recipientName="יעל"
               senderName="דנה"
-              greeting={'מזל טוב יעל!\nמגיע לך משהו יפה מהחנות.'}
+              greeting={'חשבתי עלייך.\nבחרי לך משהו יפה מהחנות שלהם.'}
               code="JAS-••••-••••"
             />
           </div>

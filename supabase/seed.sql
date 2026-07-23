@@ -48,10 +48,12 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 INSERT INTO gift_card_templates
   (id, name, occasion, language, background_color, text_color, accent_color, is_active, is_default) VALUES
-  ('20000000-0000-0000-0000-000000000001', 'חגיגה כללית',      'celebration', 'he', '#333D36', '#FFFCF5', '#E88225', true, true),
-  ('20000000-0000-0000-0000-000000000002', 'יום הולדת',        'birthday',    'he', '#B5C9AD', '#333D36', '#E88225', true, false),
-  ('20000000-0000-0000-0000-000000000003', 'חג שמח',           'holiday',     'he', '#D6E1CF', '#333D36', '#C96A17', true, false),
-  ('20000000-0000-0000-0000-000000000004', 'General (English)','general',     'en', '#FFFCF5', '#333D36', '#E88225', true, false)
+  ('20000000-0000-0000-0000-000000000001', 'חגיגה',   'celebration', 'he', '#333D36', '#FFFCF5', '#E88225', true, true),
+  ('20000000-0000-0000-0000-000000000002', 'יום הולדת','birthday',    'he', '#B5C9AD', '#333D36', '#C96A17', true, false),
+  ('20000000-0000-0000-0000-000000000003', 'חג שמח',   'holiday',     'he', '#8FA688', '#FFFCF5', '#F4A866', true, false),
+  ('20000000-0000-0000-0000-000000000005', 'תודה',     'general',     'he', '#F6F1E4', '#333D36', '#E88225', true, false),
+  ('20000000-0000-0000-0000-000000000006', 'מכל הלב',  'celebration', 'he', '#4A524D', '#FFFCF5', '#F4A866', true, false),
+  ('20000000-0000-0000-0000-000000000004', 'With Love','general',     'en', '#FFFCF5', '#333D36', '#E88225', true, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -204,7 +206,7 @@ INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, re
 ON CONFLICT DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- System settings (singleton, id=1). Presets [₪100,₪200,₪300,₪500], min ₪50,
+-- System settings (singleton, id=1). Presets [₪100,₪250,₪500,₪1000], min ₪50,
 -- max ₪5000, expiry 12 months, partial redemption allowed.
 -- -----------------------------------------------------------------------------
 INSERT INTO system_settings (
@@ -214,6 +216,6 @@ INSERT INTO system_settings (
 ) VALUES (
   1, 'Just A Second · ג׳אסט א סקונד', 'hello@justasecond.example', '03-5555555',
   'מנחם בגין 34, תל אביב', 'ILS', 'Asia/Jerusalem',
-  ARRAY[10000, 20000, 30000, 50000]::bigint[], 5000, 500000, true,
+  ARRAY[10000, 25000, 50000, 100000]::bigint[], 5000, 500000, true,
   12, true, 500, '/terms', 'he'
 ) ON CONFLICT (id) DO NOTHING;

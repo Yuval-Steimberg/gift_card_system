@@ -196,8 +196,18 @@ export function PurchaseWizard({ templates, settings }: Props) {
                     )}
                     aria-pressed={templateId === t.id}
                   >
-                    <div className="aspect-[1.6/1] w-full rounded-md" style={{ backgroundColor: t.backgroundColor }} />
-                    <div className="px-1 py-1.5 text-xs font-medium">{t.name}</div>
+                    <div
+                      className="flex aspect-[1.6/1] w-full flex-col justify-between rounded-md p-2.5"
+                      style={{ backgroundColor: t.backgroundColor, color: t.textColor }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: t.accentColor }}>
+                          JAS
+                        </span>
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.accentColor }} />
+                      </div>
+                      <span className="text-sm font-bold opacity-90">{t.name}</span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -259,7 +269,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
                 value={greeting}
                 maxLength={settings.greetingMaxLength}
                 onChange={(e) => setGreeting(e.target.value)}
-                placeholder={'מזל טוב!\nמגיע לך משהו יפה מהחנות.'}
+                placeholder={'חשבנו עלייך.\nבחרנו לך משהו יפה מהחנות שלנו, שתבחרי אותו בעצמך.'}
                 dir="auto"
                 rows={5}
               />
@@ -270,7 +280,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {['מזל טוב!', 'יום הולדת שמח', 'חג שמח', 'תודה רבה'].map((s) => (
+                {['מזל טוב', 'יום הולדת שמח', 'חג שמח', 'תודה על הכול', 'מכל הלב'].map((s) => (
                   <button key={s} type="button" className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted" onClick={() => setGreeting((g) => (g ? g : s))}>
                     {s}
                   </button>
