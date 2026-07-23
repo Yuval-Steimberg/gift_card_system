@@ -167,6 +167,13 @@ run the Supabase migrations, and schedule the delivery worker to POST `/api/cron
 `Authorization: Bearer $CRON_SECRET` (e.g. Vercel Cron / Supabase scheduled function). Do **not**
 rely on in-process timers for scheduled delivery.
 
+- **Shareable test deploy** (Vercel + Supabase, mock payments): [`docs/deploy-vercel-test.md`](docs/deploy-vercel-test.md)
+- **Real production go-live** (domain, Grow payments, Supabase Auth, accounting, legal, security):
+  [`docs/GO-LIVE-PRODUCTION.md`](docs/GO-LIVE-PRODUCTION.md)
+- **One-command DB provision:** run `supabase/setup.sql` in the Supabase SQL Editor.
+- **Diagnostics:** `GET /api/health` (store, tables, admin-query + auth probes, env flags),
+  `npm run verify:supabase`, `npm run verify:email`.
+
 ## Wix linking
 
 The app is independent of Wix. Deploy it to a branded subdomain (e.g. `gift.justasecond.co.il`)
