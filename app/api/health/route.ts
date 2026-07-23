@@ -30,6 +30,9 @@ export async function GET() {
       //  true  -> log in with your AUTH_DEMO_PASSWORD value
       //  false -> log in with the literal password: "password"
       AUTH_DEMO_PASSWORD_SET: Boolean(process.env.AUTH_DEMO_PASSWORD),
+      // Length of the stored staff password after trimming — a diagnostic to
+      // catch wrapping quotes / stray characters (compare to what you expect).
+      AUTH_DEMO_PASSWORD_LEN: (process.env.AUTH_DEMO_PASSWORD ?? '').trim().length,
     },
   }
 
