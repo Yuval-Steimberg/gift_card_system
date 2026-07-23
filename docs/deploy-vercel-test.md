@@ -66,8 +66,11 @@ layer is good to go; any ❌ names the exact table/RPC to fix.
    > It must match the live origin so the confirmation/recipient links and the webhook URL are correct.
 
 4. Deploy. The included `vercel.json` schedules the delivery worker (`/api/cron/deliver`)
-   every 5 minutes; Vercel auto-authorizes it with your `CRON_SECRET`. (On the Hobby plan cron
-   frequency may be limited — immediate delivery doesn’t need cron; only *scheduled* sends do.)
+   **once a day** (`0 9 * * *`) — the Vercel **Hobby** plan only allows daily cron jobs. Vercel
+   auto-authorizes it with your `CRON_SECRET`. This only affects *scheduled* gift cards (they’ll
+   send at the daily run); **immediate** delivery — the default and the main test path — happens
+   at purchase time and does **not** use cron. On the Pro plan you can raise the frequency, e.g.
+   `*/5 * * * *`, if you want scheduled cards to go out closer to their chosen time.
 
 ## Step 2.5 — Set up real emails (Resend)
 So recipients actually receive their gift card (not just a preview file), use Resend:
