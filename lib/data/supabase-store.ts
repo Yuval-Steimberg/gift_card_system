@@ -13,6 +13,7 @@ import type {
 } from '@/lib/gift-cards/types'
 import type { Minor } from '@/lib/money'
 import { supabaseAdmin } from './supabase-client'
+import { defaultSystemSettings } from './seed-data'
 import type {
   ActivateFromPaymentInput,
   ActivateResult,
@@ -461,7 +462,14 @@ export class SupabaseStore implements GiftCardStore {
 
   async getSettings(): Promise<SystemSettings> {
     const { data } = await this.db.from('system_settings').select('*').limit(1).maybeSingle()
-    if (!data) throw new Error('system_settings not seeded')
+    if (!data) {
+      // Row missing (seed not run yet, or table just created). Don't crash the
+      // read-only pages — fall back to safe defaults. Admin can persist real
+      // values later, and /api/health flags that the seed still needs running.
+      // eslint-disable-next-line no-console
+      console.warn('[data] system_settings row not found — using default settings (run supabase/seed.sql)')
+      return defaultSystemSettings()
+    }
     return {
       businessName: data.business_name,
       businessEmail: data.business_email,

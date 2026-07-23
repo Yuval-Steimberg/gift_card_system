@@ -118,7 +118,9 @@ export const DEMO_TEMPLATES: GiftCardTemplate[] = [
   },
 ]
 
-function defaultSettings(): SystemSettings {
+/** Default system settings — used to seed the store and as a safe fallback
+ *  when the system_settings row is missing (e.g. seed not yet run). */
+export function defaultSystemSettings(): SystemSettings {
   return {
     businessName: 'Just A Second · ג׳אסט א סקונד',
     businessEmail: 'hello@justasecond.example',
@@ -380,7 +382,7 @@ export function seedMemoryStore(): SeedBundle {
   ]
 
   return {
-    settings: defaultSettings(),
+    settings: defaultSystemSettings(),
     templates: DEMO_TEMPLATES.map((t) => ({ ...t })),
     locations,
     cards,
