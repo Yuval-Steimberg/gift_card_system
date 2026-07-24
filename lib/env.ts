@@ -10,7 +10,14 @@ import { z } from 'zod'
  */
 
 const rawServerSchema = z.object({
-  APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  // Forgiving: accepts a bare domain (adds https://), trims trailing slashes,
+  // and falls back to localhost — a mistyped base URL must not break the whole app.
+  APP_BASE_URL: z.preprocess((v) => {
+    if (typeof v !== 'string' || v.trim() === '') return 'http://localhost:3000'
+    let s = v.trim().replace(/\/+$/, '')
+    if (!/^https?:\/\//i.test(s)) s = `https://${s}`
+    return s
+  }, z.string().url()),
   BUSINESS_TIMEZONE: z.string().default('Asia/Jerusalem'),
   CRON_SECRET: z.string().default('dev-cron-secret-change-me'),
   AUTH_SECRET: z.string().default('dev-auth-secret-change-me'),
