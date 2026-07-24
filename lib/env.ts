@@ -10,14 +10,22 @@ import { z } from 'zod'
  */
 
 const rawServerSchema = z.object({
-  // Forgiving: accepts a bare domain (adds https://), trims trailing slashes,
-  // and falls back to localhost — a mistyped base URL must not break the whole app.
+  // Forgiving AND bulletproof: accepts a bare domain (adds https://), strips all
+  // whitespace (incl. accidental internal spaces) + trailing slashes, and validates
+  // with `new URL()` so a mistyped value falls back to localhost instead of throwing.
+  // serverEnv() runs on hot paths (auth, checkout) and must NEVER throw here.
   APP_BASE_URL: z.preprocess((v) => {
-    if (typeof v !== 'string' || v.trim() === '') return 'http://localhost:3000'
-    let s = v.trim().replace(/\/+$/, '')
+    const fallback = 'http://localhost:3000'
+    if (typeof v !== 'string') return fallback
+    let s = v.replace(/\s+/g, '').replace(/\/+$/, '')
+    if (s === '') return fallback
     if (!/^https?:\/\//i.test(s)) s = `https://${s}`
-    return s
-  }, z.string().url()),
+    try {
+      return new URL(s).toString().replace(/\/+$/, '')
+    } catch {
+      return fallback
+    }
+  }, z.string()),
   BUSINESS_TIMEZONE: z.string().default('Asia/Jerusalem'),
   CRON_SECRET: z.string().default('dev-cron-secret-change-me'),
   AUTH_SECRET: z.string().default('dev-auth-secret-change-me'),
