@@ -164,6 +164,22 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
     rawEvent: event.raw,
   })
 
+  // Record EVERY inbound activation outcome so a provider callback that arrives
+  // but doesn't activate (amount_mismatch, not_found, duplicate, …) is visible
+  // in the card's audit log instead of silently doing nothing. Invaluable for
+  // diagnosing "paid at the provider but the card never went active".
+  if (result.code !== 'activated') {
+    await store.appendAudit({
+      actorId: null,
+      actorRole: 'system',
+      action: `payment.webhook_${result.code}`,
+      entityType: 'gift_card',
+      entityId: event.orderRef,
+      reason: `provider=${event.provider} amount=${event.amountMinor} event=${event.eventId}`,
+      metadata: { code: result.code, providerPaymentId: event.providerPaymentId },
+    })
+  }
+
   // Only run post-activation side-effects the first time (idempotent).
   if (result.code !== 'activated' || !result.giftCard) return
   const card = result.giftCard
