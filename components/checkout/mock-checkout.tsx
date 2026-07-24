@@ -10,16 +10,21 @@ export function MockCheckout({
   checkoutId,
   giftCardId,
   amountMinor,
+  successUrl,
+  cancelUrl,
 }: {
   checkoutId: string
   giftCardId: string
   amountMinor: number
+  successUrl?: string
+  cancelUrl?: string
 }) {
   const [busy, setBusy] = useState<'approve' | 'decline' | null>(null)
 
   async function act(approve: boolean) {
     setBusy(approve ? 'approve' : 'decline')
-    const res = await completeMockPayment({ checkoutId, giftCardId, amountMinor, approve })
+    const res = await completeMockPayment({ checkoutId, giftCardId, amountMinor, approve, successUrl, cancelUrl })
+    // Full-page navigation back to the merchant, exactly like Grow's hosted page.
     window.location.href = res.redirectTo
   }
 

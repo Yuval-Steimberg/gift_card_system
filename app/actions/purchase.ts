@@ -45,14 +45,26 @@ export async function completeMockPayment(input: {
   giftCardId: string
   amountMinor: number
   approve: boolean
+  /** The exact success/cancel URLs the checkout was created with (as Grow uses). */
+  successUrl?: string
+  cancelUrl?: string
 }): Promise<MockPaymentResponse> {
+  // Fall back to the canonical paths only if the hosted page didn't carry them.
+  const successUrl = input.successUrl || `/checkout/confirmation?ref=${input.giftCardId}`
+  const cancelUrl = input.cancelUrl || `/checkout/cancelled?ref=${input.giftCardId}`
+
   const provider = getPaymentProvider()
   if (!(provider instanceof MockPaymentProvider)) {
-    return { ok: false, redirectTo: `/checkout/cancelled?ref=${input.giftCardId}` }
+    return { ok: false, redirectTo: cancelUrl }
   }
+  // Decline → return the browser to the cancel URL (no webhook), like Grow.
   if (!input.approve) {
-    return { ok: true, redirectTo: `/checkout/cancelled?ref=${input.giftCardId}` }
+    return { ok: true, redirectTo: cancelUrl }
   }
+  // Approve → Grow POSTs a signed webhook server-to-server (notify_url) AND
+  // redirects the browser to success_url. We do the same: fire the verified
+  // webhook here, then hand the browser to the configured success URL. The
+  // confirmation page polls for the paid state (which handles a lagging webhook).
   const { body, signature } = provider.buildSignedWebhook({
     eventId: `mock_evt_${input.checkoutId}`,
     orderRef: input.giftCardId,
@@ -67,7 +79,7 @@ export async function completeMockPayment(input: {
     body,
   })
   await handlePaymentWebhook(req)
-  return { ok: true, redirectTo: `/checkout/confirmation?ref=${input.giftCardId}` }
+  return { ok: true, redirectTo: successUrl }
 }
 
 export interface PurchaseStatus {

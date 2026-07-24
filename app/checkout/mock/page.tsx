@@ -10,15 +10,21 @@ export const dynamic = 'force-dynamic'
 export default function MockCheckoutPage({
   searchParams,
 }: {
-  searchParams: { cs?: string; ref?: string; amount?: string }
+  searchParams: { cs?: string; ref?: string; amount?: string; success?: string; cancel?: string }
 }) {
-  const { cs, ref, amount } = searchParams
+  const { cs, ref, amount, success, cancel } = searchParams
   if (!cs || !ref || !amount) notFound()
   const amountMinor = Number(amount)
   if (!Number.isInteger(amountMinor) || amountMinor <= 0) notFound()
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
-      <MockCheckout checkoutId={cs} giftCardId={ref} amountMinor={amountMinor} />
+      <MockCheckout
+        checkoutId={cs}
+        giftCardId={ref}
+        amountMinor={amountMinor}
+        successUrl={success}
+        cancelUrl={cancel}
+      />
     </main>
   )
 }
