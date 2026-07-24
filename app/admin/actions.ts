@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { assertPermission } from '@/lib/auth/guards'
 import { getStore } from '@/lib/data'
-import { resendGiftCard } from '@/lib/gift-cards/service'
+import { resendGiftCard, processVerifiedPaymentEvent } from '@/lib/gift-cards/service'
 import {
   adjustBalance,
   cancelCard,
@@ -71,6 +71,53 @@ export async function adminAdjust(
   const res = await adjustBalance(id, direction, amountMinor, { actorId: user.id, actorRole: user.role, reason })
   revalidate(id)
   return res
+}
+
+/**
+ * Manually activate a card whose payment succeeded at the provider but whose
+ * confirmation webhook never arrived (e.g. a Grow callback that didn't reach
+ * us). Runs the SAME verified-activation path as a real webhook — atomic
+ * activation + initial credit + receipt + delivery — using the card's own
+ * authoritative amount, so the ledger invariant and idempotency are preserved.
+ * Owner/finance only. Requires the operator to have confirmed the payment in
+ * the Grow dashboard first; the reason is recorded in the audit log.
+ */
+export async function adminMarkPaid(id: string, reason: string): Promise<ActionResult> {
+  const user = await assertPermission('giftcard:adjust_balance')
+  const store = getStore()
+  const card = await store.getGiftCardById(id)
+  if (!card) return { ok: false, message: 'שובר לא נמצא' }
+  if (['active', 'partially_redeemed', 'fully_redeemed'].includes(card.status)) {
+    return { ok: true, message: 'השובר כבר פעיל' }
+  }
+  if (!['draft', 'awaiting_payment', 'payment_processing', 'failed'].includes(card.status)) {
+    return { ok: false, message: `לא ניתן להפעיל שובר בסטטוס ${card.status}` }
+  }
+  try {
+    await processVerifiedPaymentEvent({
+      provider: 'manual',
+      eventId: `manual_${id}_${Date.now()}`,
+      orderRef: id,
+      providerPaymentId: `manual_${user.id}`,
+      status: 'paid',
+      amountMinor: card.initialAmountMinor,
+      currency: card.currency,
+      raw: { manual: true, actorId: user.id, actorRole: user.role, reason: reason || null },
+    })
+    await store.appendAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'giftcard.manual_activate',
+      entityType: 'gift_card',
+      entityId: id,
+      reason: reason?.trim() || 'הפעלה ידנית לאחר אימות תשלום מול הספק',
+      metadata: {},
+    })
+    revalidate(id)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'שגיאה בהפעלה הידנית' }
+  }
 }
 
 export async function adminResend(id: string): Promise<ActionResult> {

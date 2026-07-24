@@ -36,6 +36,7 @@ export default async function CardDetailPage({ params }: { params: { id: string 
     refund: hasPermission(user.role, 'giftcard:refund'),
     reissue: hasPermission(user.role, 'giftcard:reissue'),
     adjust: hasPermission(user.role, 'giftcard:adjust_balance'),
+    markPaid: hasPermission(user.role, 'giftcard:adjust_balance'),
     note: hasPermission(user.role, 'giftcard:add_note'),
   }
   const canReverse = hasPermission(user.role, 'redemption:reverse')

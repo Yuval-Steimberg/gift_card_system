@@ -32,6 +32,10 @@ export function Confirmation({ giftCardId }: { giftCardId: string }) {
 
   const paid = status?.paid
   const stillProcessing = status?.found && !status.paid
+  // Provider callback is taking longer than our polite polling window. The
+  // payment likely succeeded (the provider redirected here) but the verifying
+  // webhook hasn't landed yet — reassure instead of spinning forever.
+  const finalizing = stillProcessing && tries >= 20
 
   return (
     <div className="mx-auto max-w-lg text-center">
@@ -61,6 +65,22 @@ export function Confirmation({ giftCardId }: { giftCardId: string }) {
             </Button>
           </div>
         </>
+      ) : finalizing ? (
+        <>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-secondary text-foreground">
+            <Check className="h-8 w-8" />
+          </div>
+          <h1 className="mt-6 text-3xl">קיבלנו את פנייתך</h1>
+          <p className="mt-2 text-muted-foreground">
+            אם התשלום עבר, השובר יישלח לנמען/ת במייל בדקות הקרובות — יחד עם אישור רכישה אליך.
+            אין צורך להישאר בעמוד. אם לא יתקבל מייל תוך זמן קצר, פנה/י אלינו ונשמח לעזור.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <Button asChild variant="outline">
+              <Link href="/">חזרה לדף הבית</Link>
+            </Button>
+          </div>
+        </>
       ) : (
         <>
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
@@ -70,11 +90,6 @@ export function Confirmation({ giftCardId }: { giftCardId: string }) {
           <p className="mt-2 text-muted-foreground">
             אנחנו מאשרים את התשלום מול הספק. אין צורך לרענן — העמוד יתעדכן אוטומטית.
           </p>
-          {tries >= 20 && (
-            <p className="mt-4 text-sm text-muted-foreground">
-              האישור מתעכב. אם חויבת, השובר יישלח ברגע שנאמת את התשלום. לשאלות פנה/י אלינו.
-            </p>
-          )}
         </>
       )}
     </div>

@@ -8,6 +8,7 @@ import {
   adminAdjust,
   adminAddNote,
   adminCancel,
+  adminMarkPaid,
   adminReactivate,
   adminRefund,
   adminReissue,
@@ -22,6 +23,7 @@ export interface ActionPerms {
   refund: boolean
   reissue: boolean
   adjust: boolean
+  markPaid: boolean
   note: boolean
 }
 
@@ -50,6 +52,7 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
 
   const isLive = status === 'active' || status === 'partially_redeemed'
   const isSuspended = status === 'suspended'
+  const isPreActivation = ['draft', 'awaiting_payment', 'payment_processing', 'failed'].includes(status)
 
   return (
     <div className="space-y-3">
@@ -60,6 +63,11 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
       )}
 
       <div className="flex flex-wrap gap-2">
+        {perms.markPaid && isPreActivation && (
+          <Button size="sm" disabled={pending} onClick={() => setOpen(open === 'markPaid' ? null : 'markPaid')}>
+            סימון כשולם והפעלה
+          </Button>
+        )}
         {perms.resend && (
           <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => adminResend(id), 'נשלח מחדש')}>
             שליחה מחדש
@@ -83,11 +91,18 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
           reason={reason}
           setReason={setReason}
           pending={pending}
+          hint={
+            open === 'markPaid'
+              ? 'להשתמש רק לאחר אימות שהתשלום בוצע בפועל בלוח הבקרה של הספק. פעולה זו מפעילה את השובר, מזכה את היתרה ושולחת אותו לנמען.'
+              : undefined
+          }
+          confirmLabel={open === 'markPaid' ? 'הפעלת השובר' : 'אישור'}
           onConfirm={() => {
             if (open === 'suspend') run(() => adminSuspend(id, reason), 'הושהה')
             if (open === 'cancel') run(() => adminCancel(id, reason), 'בוטל')
             if (open === 'refund') run(() => adminRefund(id, reason), 'הוחזר')
             if (open === 'reissue') run(() => adminReissue(id, reason), 'הונפק מחדש')
+            if (open === 'markPaid') run(() => adminMarkPaid(id, reason), 'השובר הופעל')
           }}
         />
       )}
@@ -133,17 +148,22 @@ function ReasonBox({
   setReason,
   onConfirm,
   pending,
+  hint,
+  confirmLabel = 'אישור',
 }: {
   reason: string
   setReason: (v: string) => void
   onConfirm: () => void
   pending: boolean
+  hint?: string
+  confirmLabel?: string
 }) {
   return (
     <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
       <Input placeholder="סיבה (חובה, נשמר ביומן הביקורת)" value={reason} onChange={(e) => setReason(e.target.value)} className="h-9" />
       <Button size="sm" disabled={pending || reason.trim().length < 3} onClick={onConfirm}>
-        אישור
+        {confirmLabel}
       </Button>
     </div>
   )
