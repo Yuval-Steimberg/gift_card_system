@@ -59,10 +59,23 @@ export class GrowPaymentProvider implements PaymentProvider {
   }
 
   async createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession> {
-    const name = input.customer.name ?? ''
-    const email = input.customer.email ?? ''
+    const name = (input.customer.name ?? '').trim()
+    const email = (input.customer.email ?? '').trim()
     // Grow validates Israeli phones strictly; normalize like the reference.
     const phone = input.customer.phone ? (normalizeIsraeliPhone(input.customer.phone) ?? '') : ''
+
+    // Fail fast with a clear message BEFORE hitting Grow/Make, exactly like the
+    // JAS Netlify function does. An empty name or phone is what surfaces as the
+    // cryptic Grow errors "Missing value of required parameter 'phone'" and
+    // "427 – שדה לא תקין: pageFieldSettings[fullName][value]". Guarding here means
+    // Grow never receives an empty required field, so those errors can't occur.
+    if (!phone) {
+      throw new Error('מספר טלפון לא תקין — נדרש מספר נייד ישראלי תקין (למשל 0501234567)')
+    }
+    if (name.length < 2) {
+      throw new Error('נא להזין שם מלא של הרוכש (שם פרטי ושם משפחה)')
+    }
+
     // Grow expects a major-unit amount (shekels), like the reference.
     const sum = toMajor(input.amountMinor, input.currency)
     const description = input.description
