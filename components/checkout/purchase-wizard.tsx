@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { GiftCardPreview } from '@/components/gift-card/gift-card-preview'
 import { formatMoney, parseMajorToMinor } from '@/lib/money'
+import { normalizeIsraeliPhone } from '@/lib/validation/purchase'
 import { cn } from '@/lib/utils'
 import { Check, ChevronLeft, ChevronRight, Loader } from '@/components/icons'
 import { startPurchase } from '@/app/actions/purchase'
@@ -50,6 +51,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
   const senderTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || settings.timezone
 
   const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+  const phoneOk = (v: string) => normalizeIsraeliPhone(v) !== null
 
   function stepValid(i: number): boolean {
     switch (i) {
@@ -58,7 +60,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
       case 1:
         return Boolean(templateId)
       case 2:
-        return buyerName.trim().length >= 2 && emailOk(buyerEmail)
+        return buyerName.trim().length >= 2 && emailOk(buyerEmail) && phoneOk(buyerPhone)
       case 3:
         return recipientName.trim().length >= 2 && emailOk(recipientEmail)
       case 4:
@@ -224,7 +226,10 @@ export function PurchaseWizard({ templates, settings }: Props) {
               <legend className="text-lg font-bold">פרטי הרוכש/ת</legend>
               <Field label="שם מלא" value={buyerName} onChange={setBuyerName} required />
               <Field label="אימייל" type="email" dir="ltr" value={buyerEmail} onChange={setBuyerEmail} required />
-              <Field label="טלפון (לא חובה)" type="tel" dir="ltr" value={buyerPhone} onChange={setBuyerPhone} />
+              <Field label="טלפון (נייד ישראלי)" type="tel" dir="ltr" value={buyerPhone} onChange={setBuyerPhone} required />
+              {buyerPhone.length > 0 && !phoneOk(buyerPhone) && (
+                <p className="text-sm text-destructive">מספר טלפון ישראלי לא תקין (למשל 0501234567)</p>
+              )}
               <Checkbox label="שליחה אנונימית (השם שלי לא יופיע על השובר)" checked={sendAnonymously} onChange={setSendAnonymously} />
               {!sendAnonymously && (
                 <Checkbox label="הצגת שמי על השובר" checked={showBuyerName} onChange={setShowBuyerName} />

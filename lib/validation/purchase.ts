@@ -29,7 +29,13 @@ export const purchaseInputSchema = z.object({
 
   buyerName: nameSchema,
   buyerEmail: emailSchema,
-  buyerPhone: phoneSchema.optional().default(''),
+  // Required + valid Israeli number: the Grow payment provider rejects missing/
+  // invalid phones (surfaces as a cryptic "Scenario failed to complete").
+  buyerPhone: z
+    .string()
+    .trim()
+    .min(1, 'נא להזין מספר טלפון')
+    .refine((v) => normalizeIsraeliPhone(v) !== null, 'מספר טלפון ישראלי לא תקין'),
   buyerCompany: z.string().trim().max(160).optional().default(''),
   buyerTaxId: z.string().trim().max(40).optional().default(''),
   wantsInvoice: z.boolean().default(false),
