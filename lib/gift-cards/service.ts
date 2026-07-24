@@ -174,11 +174,19 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
     await store.appendAudit({
       actorId: null,
       actorRole: 'system',
-      action: 'receipt.issued',
+      // Providers that catch their own errors return status:'failed' + error
+      // (rather than throwing). Record the reason so it's visible in /admin.
+      action: receipt.status === 'issued' ? 'receipt.issued' : 'receipt.failed',
       entityType: 'gift_card',
       entityId: card.id,
-      reason: null,
-      metadata: { provider: receipt.provider, documentNumber: receipt.documentNumber, status: receipt.status },
+      reason: receipt.error ?? null,
+      metadata: {
+        provider: receipt.provider,
+        documentNumber: receipt.documentNumber,
+        documentType: receipt.documentType,
+        status: receipt.status,
+        error: receipt.error ?? null,
+      },
     })
     // Buyer confirmation email.
     await sendBuyerConfirmation(card, receipt.documentNumber)
