@@ -21,7 +21,7 @@ export async function loginEmployee(_prev: unknown, formData: FormData): Promise
 }
 
 export async function logoutEmployee(): Promise<void> {
-  logout()
+  await logout()
   redirect('/employee/login')
 }
 

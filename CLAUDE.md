@@ -44,7 +44,8 @@ Vitest · Playwright · ESLint/Prettier · GitHub Actions.
   ledger, PDF, QR, service (orchestration), admin-service (stats + lifecycle).
 - `lib/data/` — store interface, MemoryStore, SupabaseStore, supabase-client, seed-data.
 - `lib/payments|delivery/email|accounting/` — provider interfaces + mock + real adapters + factory.
-- `lib/auth/` — demo cookie auth (session/users/guards). **Replace with Supabase Auth for prod.**
+- `lib/auth/` — **dual-mode auth**: Supabase Auth (`supabase-auth.ts` + root `middleware.ts`) when
+  Supabase is configured; demo cookie auth (`session.ts`/`users.ts`) offline. Roles from `user_roles`.
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
 - `app/` — `(public)` landing + `/gift-cards` funnel, `/gift/[token]` recipient, `/employee`,
   `/admin`, `/api` (webhooks/payment, cron/deliver, health).
@@ -106,6 +107,8 @@ Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile 
 - Grow payment adapter **mirrors the existing JAS website exactly** (Make.com scenario → Grow, with
   a direct Grow REST fallback; same fields + webhook parsing; unit-tested in `tests/unit/grow.test.ts`)
   but still needs a **live transaction test** before launch. Set `PAYMENT_PROVIDER=grow` + `GROW_*`
-  (+ optional `MAKE_WEBHOOK_URL`). Green Invoice receipt adapter is still a stub. Demo auth is not
-  production-grade. Legal/privacy/accounting need professional review. Hebrew PDF glyphs need a font
+  (+ optional `MAKE_WEBHOOK_URL`). Green Invoice receipt adapter is **implemented** (token +
+  create-document) but likewise **unverified live** — sandbox-test it and set `GREENINVOICE_DOC_TYPE`
+  per the accountant. Supabase Auth is implemented (dual-mode). Sentry reporting + CSP are wired.
+  Remaining non-code work: legal/privacy review, live payment + accounting tests, Hebrew PDF font
   drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`.

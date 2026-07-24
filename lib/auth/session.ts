@@ -1,8 +1,9 @@
 import 'server-only'
 import { cookies } from 'next/headers'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { serverEnv } from '@/lib/env'
+import { serverEnv, isSupabaseConfigured } from '@/lib/env'
 import { findDemoUserByEmail, findDemoUserById, DEMO_PASSWORD, type AppUser } from './users'
+import { supabaseCurrentUser, supabaseSignIn, supabaseSignOut } from './supabase-auth'
 
 const COOKIE = 'gcs_session'
 const MAX_AGE = 60 * 60 * 8 // 8h
@@ -44,10 +45,19 @@ export interface LoginResult {
 }
 
 /**
- * Demo credential check + session cookie issue. Production replaces this with
- * Supabase Auth (email/password, magic link, MFA for privileged users).
+ * Sign in. Uses Supabase Auth when configured (production), else the demo
+ * credential path below (offline dev + tests).
  */
 export async function login(email: string, password: string): Promise<LoginResult> {
+  if (isSupabaseConfigured()) {
+    const res = await supabaseSignIn(email, password)
+    return { ok: res.ok, message: res.message }
+  }
+  return demoLogin(email, password)
+}
+
+/** Demo credential check + signed session cookie (offline/dev only). */
+async function demoLogin(email: string, password: string): Promise<LoginResult> {
   const user = findDemoUserByEmail(email)
   // Trim to tolerate accidental trailing whitespace/newlines in the env var or
   // the typed value (common when pasting a password into a Vercel env field).
@@ -65,12 +75,17 @@ export async function login(email: string, password: string): Promise<LoginResul
   return { ok: true, user }
 }
 
-export function logout(): void {
+export async function logout(): Promise<void> {
+  if (isSupabaseConfigured()) {
+    await supabaseSignOut()
+    return
+  }
   cookies().delete(COOKIE)
 }
 
-/** Resolve the current authenticated user from the session cookie (or null). */
+/** Resolve the current authenticated user (Supabase session or demo cookie). */
 export async function getCurrentUser(): Promise<AppUser | null> {
+  if (isSupabaseConfigured()) return supabaseCurrentUser()
   const token = cookies().get(COOKIE)?.value
   if (!token) return null
   const payload = decode(token)

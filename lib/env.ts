@@ -37,8 +37,12 @@ const rawServerSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
 
   RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).default('mock'),
+  GREENINVOICE_API_URL: z.string().optional(),
   GREENINVOICE_API_KEY: z.string().optional(),
   GREENINVOICE_API_SECRET: z.string().optional(),
+  // Green Invoice document type code (accountant-confirmed). Default 320
+  // (חשבונית מס/קבלה). 400=receipt, 305=tax invoice, 300=proforma.
+  GREENINVOICE_DOC_TYPE: z.string().optional(),
 
   SENTRY_DSN: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

@@ -2,6 +2,7 @@ import 'server-only'
 import { getPaymentProvider } from './index'
 import { WebhookVerificationError } from './types'
 import { processVerifiedPaymentEvent } from '@/lib/gift-cards/service'
+import { reportError } from '@/lib/logging/report'
 
 export interface WebhookOutcome {
   status: number
@@ -31,6 +32,7 @@ export async function handlePaymentWebhook(request: Request): Promise<WebhookOut
     return { status: 200, body: { ok: true, received: true } }
   } catch (err) {
     // Internal error — return 500 so the provider retries.
+    await reportError(err, { scope: 'payment_webhook', eventId: event.eventId, orderRef: event.orderRef })
     return { status: 500, body: { ok: false, error: err instanceof Error ? err.message : 'internal_error' } }
   }
 }

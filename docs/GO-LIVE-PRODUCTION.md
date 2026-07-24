@@ -37,30 +37,36 @@ commands and **where to find every piece of data**.
 
 ---
 
-## 2. 💻⚠️ Real staff authentication (replace demo auth)
+## 2. 🔧⚠️ Real staff authentication (Supabase Auth) — CODE DONE
 
-The demo cookie auth (`lib/auth/`) with a shared `AUTH_DEMO_PASSWORD` is **not production-grade** —
-anyone with the password is "owner". Replace it with **Supabase Auth** (already a dependency).
+✅ **Code is implemented.** The auth layer is now dual-mode: when Supabase is configured it uses
+**Supabase Auth** (`lib/auth/supabase-auth.ts` + `middleware.ts`), pulling the role from
+`user_roles` via `profiles.auth_user_id`; offline it falls back to demo auth. No code change needed
+— just create the users and grant roles.
 
-**Where the data lives:** Supabase → **Authentication** (users) and your `profiles` + `user_roles`
-tables (already created by `0001_init.sql`).
+**Where the data lives:** Supabase → **Authentication** (users) + your `profiles`/`user_roles`
+tables (created by `0001_init.sql`).
 
-**Steps:**
-1. Supabase → **Authentication → Providers** → enable **Email** (+ optionally magic link). Turn on
-   **email confirmations**. For privileged users enable **MFA** (Authentication → settings).
-2. Supabase → **Authentication → Users → Add user** for each real staff member. Copy each user's
-   UUID.
-3. Insert their profile + role (SQL Editor):
+**Steps (config only):**
+1. Supabase → **Authentication → Providers** → enable **Email**. Turn on **email confirmations**;
+   enable **MFA** for privileged users (Authentication → settings).
+2. Supabase → **Authentication → Users → Add user** for each staff member → copy each **User UID**.
+3. In **SQL Editor**, link each auth user to a profile + role:
    ```sql
-   insert into profiles (auth_user_id, email, name) values ('<uuid>', 'noa@justasecond.co.il', 'נעה');
-   insert into user_roles (user_id, role) values ('<profile-id>', 'owner');  -- owner/admin/store_manager/store_employee/finance/read_only
+   -- 1) create the profile linked to the auth user (or update the seeded one)
+   insert into profiles (auth_user_id, email, full_name)
+   values ('<auth-user-uid>', 'noa@justasecond.co.il', 'נעה ברנט')
+   on conflict (email) do update set auth_user_id = excluded.auth_user_id;
+   -- 2) grant a role (owner/admin/store_manager/store_employee/finance/read_only)
+   insert into user_roles (profile_id, role)
+   values ((select id from profiles where email='noa@justasecond.co.il'), 'owner')
+   on conflict do nothing;
    ```
-4. 💻 **Code change (dev task):** swap `lib/auth/session.ts` + `lib/auth/guards.ts` to read the
-   Supabase session (via `@supabase/ssr` cookies) and look up the role from `user_roles` instead of
-   the hardcoded `DEMO_USER_LIST`. Keep the `Role`/`Permission` model in `lib/permissions/roles.ts`
-   as-is. Delete `AUTH_DEMO_PASSWORD` from Vercel afterward.
-   > This is the one item that needs real development, not just config. Everything downstream
-   > (RBAC, RLS, audit) already keys off `user.id`/`user.role`, so the surface is small.
+4. **Delete `AUTH_DEMO_PASSWORD`** from Vercel (no longer used once Supabase Auth is on). Redeploy.
+5. Test: log in at `/employee/login` with the staff email + the password you set in Supabase.
+
+> Sign-in accepts only users who have a `profiles` row + a `user_roles` grant — anyone else is
+> rejected as "no staff permissions".
 
 ---
 
@@ -123,23 +129,25 @@ Verify end-to-end: `npm run verify:email someone@gmail.com` → expect ✓.
 
 ---
 
-## 5. 💻📄⚠️ Accounting / receipts (Green Invoice / Morning)
+## 5. 🔧📄⚠️ Accounting / receipts (Green Invoice / Morning) — CODE DONE
 
-The receipt provider is a **mock**; the Green Invoice adapter (`lib/accounting/greeninvoice.ts`) is a
-**stub**. Do NOT enable it until the treatment is confirmed.
+✅ **Code is implemented** (`lib/accounting/greeninvoice.ts`): token auth → create document →
+store number + URL. It's written to the documented v1 API but is **UNVERIFIED against a live
+account** — run it in the **sandbox** first (like Grow).
 
 **⚠️ First, ask the business's Israeli accountant** which document a gift-card sale requires
-(receipt at purchase vs. tax invoice at redemption vs. deposit receipt) — this changes *when* and
-*what* the code issues.
+(receipt vs. tax invoice at redemption vs. deposit receipt) and set `GREENINVOICE_DOC_TYPE`
+accordingly — this is the one decision the code can't make.
 
-**Where to get the data:** a **Green Invoice / Morning** (morning.co.il) account → API keys.
+**Where to get the data:** a **Green Invoice / Morning** (morning.co.il) account → **Settings → API keys**.
 ```
-RECEIPT_PROVIDER      = greeninvoice
-GREENINVOICE_API_KEY  = <from Green Invoice>
+RECEIPT_PROVIDER        = greeninvoice
+GREENINVOICE_API_URL    = https://api.greeninvoice.co.il   # or the sandbox URL to test first
+GREENINVOICE_API_KEY    = <from Green Invoice>
 GREENINVOICE_API_SECRET = <from Green Invoice>
+GREENINVOICE_DOC_TYPE   = 320   # accountant-confirmed: 400=receipt, 320=invoice-receipt, 305=tax invoice
 ```
-💻 Implement `createReceipt()` in `lib/accounting/greeninvoice.ts` against their API per the
-accountant's decision, store the document number/URL, and test issuance on a real purchase.
+Redeploy, buy a card in the sandbox, and confirm a document is issued (check the card's audit log).
 
 ---
 
@@ -166,14 +174,14 @@ The app is explicitly **not represented as legally certified**.
       (test with the anon key).
 - [ ] 💻 For multi-instance scale, back the rate limiter (`lib/security/rate-limit.ts`) with
       Redis/Upstash (currently in-memory / per-instance).
-- [ ] Add a Content-Security-Policy header in `next.config.mjs` (base security headers already set).
+- [x] Content-Security-Policy + security headers — ✅ set in `next.config.mjs`.
 
 ---
 
 ## 8. 🔧 Monitoring, alerts & backups
 
-- **Sentry:** create a project at sentry.io → copy the DSN → set `SENTRY_DSN` in Vercel. (Wire the
-  SDK in — the env slot exists.)
+- **Sentry:** ✅ wired (`lib/logging/report.ts` forwards server errors to Sentry's ingest API — no
+  SDK needed). Just create a project at sentry.io → copy the DSN → set `SENTRY_DSN` in Vercel → redeploy.
 - **Backups:** Supabase → **Database → Backups**. On the Pro plan enable **Point-in-Time Recovery**.
   Gift cards are financial value — take backups seriously.
 - **Alerts:** operational alerts currently surface in `/admin` + logs; add email/Slack from
