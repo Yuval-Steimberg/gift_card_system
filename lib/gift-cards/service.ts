@@ -96,18 +96,28 @@ export async function createPurchase(input: PurchaseInput): Promise<CreatePurcha
     status: 'pending',
   })
 
-  const provider = getPaymentProvider()
   const base = env.APP_BASE_URL
-  const session = await provider.createCheckoutSession({
-    orderRef: card.id,
-    amountMinor: card.initialAmountMinor,
-    currency: card.currency,
-    description: `${settings.businessName} — שובר מתנה ${formatMoney(card.initialAmountMinor, card.currency)}`,
-    customer: { name: input.buyerName, email: input.buyerEmail, phone: input.buyerPhone || null },
-    successUrl: `${base}/checkout/confirmation?ref=${card.id}`,
-    cancelUrl: `${base}/checkout/cancelled?ref=${card.id}`,
-    notifyUrl: `${base}/api/webhooks/payment`,
-  })
+  let session
+  try {
+    const provider = getPaymentProvider()
+    session = await provider.createCheckoutSession({
+      orderRef: card.id,
+      amountMinor: card.initialAmountMinor,
+      currency: card.currency,
+      description: `${settings.businessName} — שובר מתנה ${formatMoney(card.initialAmountMinor, card.currency)}`,
+      customer: { name: input.buyerName, email: input.buyerEmail, phone: input.buyerPhone || null },
+      successUrl: `${base}/checkout/confirmation?ref=${card.id}`,
+      cancelUrl: `${base}/checkout/cancelled?ref=${card.id}`,
+      notifyUrl: `${base}/api/webhooks/payment`,
+    })
+  } catch (err) {
+    const { reportError } = await import('@/lib/logging/report')
+    await reportError(err, { scope: 'createCheckoutSession', giftCardId: card.id, provider: env.PAYMENT_PROVIDER })
+    return {
+      ok: false,
+      message: `יצירת עמוד התשלום נכשלה (${env.PAYMENT_PROVIDER}): ${err instanceof Error ? err.message : 'unknown'}`,
+    }
+  }
   await store.setCheckoutOpened(card.id, session.checkoutId)
 
   await store.appendAudit({

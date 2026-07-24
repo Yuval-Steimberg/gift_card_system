@@ -25,9 +25,14 @@ export async function startPurchase(raw: unknown): Promise<StartPurchaseResponse
     }
     return { ok: false, message: 'יש לתקן את השדות המסומנים', fieldErrors }
   }
-  const result = await createPurchase(parsed.data)
-  if (!result.ok) return { ok: false, message: result.message }
-  return { ok: true, redirectUrl: result.redirectUrl }
+  try {
+    const result = await createPurchase(parsed.data)
+    if (!result.ok) return { ok: false, message: result.message }
+    return { ok: true, redirectUrl: result.redirectUrl }
+  } catch (err) {
+    // Never let a server error hang the checkout button — surface the reason.
+    return { ok: false, message: err instanceof Error ? err.message : 'שגיאת שרת בעת יצירת התשלום' }
+  }
 }
 
 export interface MockPaymentResponse {

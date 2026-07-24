@@ -85,34 +85,39 @@ export function PurchaseWizard({ templates, settings }: Props) {
     setServerError(null)
     const scheduledDeliveryAt =
       deliveryTiming === 'scheduled' && scheduledLocal ? new Date(scheduledLocal).toISOString() : null
-    const res = await startPurchase({
-      amountMinor,
-      templateId,
-      buyerName,
-      buyerEmail,
-      buyerPhone,
-      buyerCompany,
-      buyerTaxId,
-      wantsInvoice,
-      showBuyerName,
-      sendAnonymously,
-      recipientName,
-      recipientEmail,
-      recipientPhone,
-      recipientLanguage,
-      deliveryChannel: 'email',
-      greeting,
-      deliveryTiming,
-      scheduledDeliveryAt,
-      senderTimezone,
-      acceptedTerms,
-    })
-    if (res.ok && res.redirectUrl) {
-      window.location.href = res.redirectUrl
-      return
+    try {
+      const res = await startPurchase({
+        amountMinor,
+        templateId,
+        buyerName,
+        buyerEmail,
+        buyerPhone,
+        buyerCompany,
+        buyerTaxId,
+        wantsInvoice,
+        showBuyerName,
+        sendAnonymously,
+        recipientName,
+        recipientEmail,
+        recipientPhone,
+        recipientLanguage,
+        deliveryChannel: 'email',
+        greeting,
+        deliveryTiming,
+        scheduledDeliveryAt,
+        senderTimezone,
+        acceptedTerms,
+      })
+      if (res.ok && res.redirectUrl) {
+        window.location.href = res.redirectUrl
+        return
+      }
+      setServerError(res.message ?? 'אירעה שגיאה. נסו שוב.')
+    } catch {
+      setServerError('אירעה שגיאה בחיבור לשרת. נסו שוב.')
+    } finally {
+      setSubmitting(false)
     }
-    setSubmitting(false)
-    setServerError(res.message ?? 'אירעה שגיאה. נסו שוב.')
   }
 
   return (
