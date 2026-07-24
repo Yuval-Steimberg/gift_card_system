@@ -103,6 +103,9 @@ Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile 
 
 ## Known limitations (still mock/unverified — see production guide)
 
-- Grow payment adapter + Green Invoice receipt adapter are written but **unverified against live
-  accounts**. Demo auth is not production-grade. Legal/privacy/accounting need professional review.
-  Hebrew PDF glyphs need a font drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`.
+- Grow payment adapter **mirrors the existing JAS website exactly** (Make.com scenario → Grow, with
+  a direct Grow REST fallback; same fields + webhook parsing; unit-tested in `tests/unit/grow.test.ts`)
+  but still needs a **live transaction test** before launch. Set `PAYMENT_PROVIDER=grow` + `GROW_*`
+  (+ optional `MAKE_WEBHOOK_URL`). Green Invoice receipt adapter is still a stub. Demo auth is not
+  production-grade. Legal/privacy/accounting need professional review. Hebrew PDF glyphs need a font
+  drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`.

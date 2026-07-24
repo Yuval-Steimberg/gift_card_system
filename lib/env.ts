@@ -28,6 +28,9 @@ const rawServerSchema = z.object({
   GROW_API_KEY: z.string().optional(),
   GROW_API_SECRET: z.string().optional(),
   GROW_PAGE_CODE: z.string().optional(),
+  // Optional Make.com webhook (Grow-via-Make), same as the JAS website. When
+  // set, checkout goes through the Make scenario; otherwise the direct Grow API.
+  MAKE_WEBHOOK_URL: z.string().optional(),
 
   EMAIL_PROVIDER: z.enum(['log', 'resend']).default('log'),
   EMAIL_FROM: z.string().default('Just A Second <gifts@example.com>'),

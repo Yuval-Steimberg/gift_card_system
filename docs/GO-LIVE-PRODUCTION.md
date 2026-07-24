@@ -66,34 +66,42 @@ tables (already created by `0001_init.sql`).
 
 ## 3. 💻📄⚠️ Real payments — Grow (grow.link / Meshulam)
 
-The `GrowPaymentProvider` (`lib/payments/grow.ts`) is written to Grow's documented shapes but is
-**UNVERIFIED against a live account**. Treat this as an integration task, not a flip of a switch.
+The `GrowPaymentProvider` (`lib/payments/grow.ts`) is modeled **exactly on the existing Just A
+Second website** (Make.com scenario → Grow, with a direct Grow REST fallback), so it plugs into the
+business's existing Grow account + Make scenario. It sends the same fields (`price`/`fullName`/
+`phone`/… + `success_url`/`cancel_url`/`notify_url`) and parses the same webhook
+(`transactionCode`/`asmachta`, `cField1`, `sum`, `statusCode`). Verified by unit tests
+(`tests/unit/grow.test.ts`); still do a live transaction test before launch.
 
-**Where to get the data:** open a **Grow business account** (grow.link) → merchant dashboard →
-API / integration settings. You'll need:
-- `GROW_API_KEY` (userId), `GROW_API_SECRET` (apiKey), `GROW_PAGE_CODE` — from Grow dashboard.
-- The **webhook signature scheme** — ⚠️ confirm with Grow support exactly how they sign callbacks
-  (header name + algorithm). `verifyWebhook()` currently expects an HMAC in `x-grow-signature`;
-  adjust to match Grow's real scheme.
+**Where to get the data:** the business's existing **Grow account** (grow.link) + **Make.com**
+scenario (the same ones the current website uses). You'll need:
+- `GROW_API_KEY` (userId), `GROW_API_SECRET` (apiKey), `GROW_PAGE_CODE` — from the Grow dashboard.
+- `MAKE_WEBHOOK_URL` — the Make.com webhook URL of the existing "create Grow payment" scenario
+  (optional; leave empty to call Grow's REST API directly instead).
 
 **Steps:**
-1. In Vercel env:
+1. In Vercel env (reuse the SAME values the current site uses):
    ```
    PAYMENT_PROVIDER      = grow
    GROW_API_KEY          = <from Grow>
    GROW_API_SECRET       = <from Grow>
    GROW_PAGE_CODE        = <from Grow>
    GROW_API_URL          = https://restapi.grow.link
-   PAYMENT_WEBHOOK_SECRET = <long random; must match what Grow signs with>
+   MAKE_WEBHOOK_URL      = <your existing Make.com scenario URL>   # optional
+   PAYMENT_WEBHOOK_SECRET = <long random>                          # see step 3
    ```
    Generate a secret: `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`
-2. Set your webhook/notify URL in Grow (or it's sent per-request) to
-   `https://gift.justasecond.co.il/api/webhooks/payment`.
-3. 💻 Reconcile `lib/payments/grow.ts` field names + signature with Grow's live docs. Then **redeploy**.
-4. ⚠️ **Test with one real low-value transaction** (e.g. ₪50): confirm the webhook is received,
-   signature verifies, the amount reconciles, exactly one card activates, and a receipt + delivery fire.
-   Check `/admin/gift-cards/<id>` ledger + audit.
-5. Test a **refund** from `/admin` and confirm Grow processes it.
+2. Point the payment **notify/callback** to `https://gift.justasecond.co.il/api/webhooks/payment`
+   (the adapter already sends this as `notify_url`; make sure the Make scenario forwards it to Grow).
+3. **(Recommended) Lock down the webhook.** The reference site did no signature check. This adapter
+   accepts an OPTIONAL shared secret: add a `secret` field (= your `PAYMENT_WEBHOOK_SECRET`) to the
+   Make scenario's call to `/api/webhooks/payment`, and the adapter will require it. Even without it,
+   forgery is contained (unguessable UUID order ref + amount reconciliation + one-time activation).
+4. **Redeploy** (env changes need it).
+5. ⚠️ **Test with one real low-value transaction** (e.g. ₪50): confirm the webhook is received, the
+   amount reconciles, exactly one card activates, and a receipt + delivery fire. Check
+   `/admin/gift-cards/<id>` ledger + audit.
+6. Test a **refund** from `/admin` and confirm Grow processes it.
 
 > Alternative: Stripe is in the deps but unused. If the business qualifies for Stripe ILS, a
 > `StripePaymentProvider` can be added behind the same `PaymentProvider` interface.

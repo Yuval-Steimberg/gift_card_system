@@ -19,6 +19,7 @@ export function getPaymentProvider(): PaymentProvider {
       apiKey: env.GROW_API_KEY!,
       apiSecret: env.GROW_API_SECRET!,
       pageCode: env.GROW_PAGE_CODE ?? '1',
+      makeWebhookUrl: env.MAKE_WEBHOOK_URL,
       webhookSecret: env.PAYMENT_WEBHOOK_SECRET,
     })
   } else {
