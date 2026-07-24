@@ -24,7 +24,10 @@ export async function GET() {
       SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
       NEXT_PUBLIC_SUPABASE_ANON_KEY: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
       PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER ?? 'mock',
+      MAKE_WEBHOOK_URL_SET: Boolean(process.env.MAKE_WEBHOOK_URL),
+      GROW_KEYS_SET: Boolean(process.env.GROW_API_KEY && process.env.GROW_API_SECRET),
       EMAIL_PROVIDER: process.env.EMAIL_PROVIDER ?? 'log',
+      RECEIPT_PROVIDER: process.env.RECEIPT_PROVIDER ?? 'mock',
       APP_BASE_URL: Boolean(process.env.APP_BASE_URL),
       // Which staff password applies on THIS running deployment:
       //  true  -> log in with your AUTH_DEMO_PASSWORD value
