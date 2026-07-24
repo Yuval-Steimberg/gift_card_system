@@ -22,7 +22,8 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "verify:supabase": "node scripts/verify-supabase.mjs",
-    "verify:email": "node scripts/verify-email.mjs"
+    "verify:email": "node scripts/verify-email.mjs",
+    "verify:greeninvoice": "node scripts/verify-greeninvoice.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
