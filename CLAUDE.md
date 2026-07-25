@@ -78,11 +78,14 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
   end-to-end** (Grow charged the card + issued a receipt). ⚠️ The one open item is Grow's
   server-to-server callback (see gotcha #8) — until it lands automatically, activate paid cards
   with the admin **"סימון כשולם והפעלה"** button (`adminMarkPaid`).
-- **Email:** `EMAIL_PROVIDER=sendgrid` + `SENDGRID_API_KEY`. **Resend was abandoned** — it needs a
+- **Email:** ✅ **LIVE + confirmed** (a real card email landed in the inbox via SendGrid).
+  `EMAIL_PROVIDER=sendgrid` + `SENDGRID_API_KEY`. **Resend was abandoned** — it needs a
   `send` subdomain **MX** record and Wix DNS cannot create subdomain MX (gotcha #9). SendGrid
   authenticates the domain with **CNAME** records (Wix supports those); `justasecond.co.il` is
   **domain-authenticated in SendGrid**. `EMAIL_FROM="Just A Second <gifts@justasecond.co.il>"`
-  (keep the closing `>`). Adapter: `lib/delivery/email/sendgrid.ts` (unit-tested).
+  (the SENDER; keep the closing `>`). Adapter: `lib/delivery/email/sendgrid.ts` (unit-tested).
+  The "for questions" **contact** address in the email body is `settings.businessEmail`
+  (`/admin → הגדרות`; set to the real `justasecondil2@gmail.com`) — separate from the sender.
 - **Receipt/accounting:** `RECEIPT_PROVIDER=mock` (Green Invoice still unverified). NOTE: this var
   only accepts `mock`|`greeninvoice` — do NOT put `sendgrid` here (that once white-screened admin; now
   guarded, gotcha #3/env `.catch`).
@@ -136,12 +139,19 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
    (`{...}/api/webhooks/payment`, `{...}/checkout/confirmation?ref={order_ref}`), else a paid card
    never activates. (b) Grow rejects an **empty Full Name/phone** with `427 pageFieldSettings[fullName][value]`
    / "Missing parameter 'phone'"; buyer name+phone are now required + guarded in `grow.ts` before
-   the Make call. (c) Grow's **server-to-server callback** to the custom domain `gift.justasecond.co.il`
-   (Wix DNS) may not arrive even when payment succeeds — the browser redirect works but the POST
-   doesn't. Point the Make module's notify URL at the **raw Vercel domain**
-   (`gift-card-system-8i8e.vercel.app/api/webhooks/payment`), or use the admin `adminMarkPaid`
-   button. `processVerifiedPaymentEvent` now audits every outcome (`payment.webhook_<code>`) so a
-   callback that arrives-but-doesn't-activate (e.g. `amount_mismatch`) is visible in the card log.
+   the Make call. (c) Grow's **server-to-server callback NEVER ARRIVES** — the browser redirect
+   works but the POST doesn't, and the card audit log shows **zero** `payment.webhook_*` hits
+   **even after** repointing the Make notify URL at the raw Vercel domain
+   (`gift-card-system-8i8e.vercel.app/api/webhooks/payment`). So it's **not a domain problem** —
+   Grow simply isn't sending server notifications for this Meshulam terminal (IPN/"עדכון שרת" likely
+   disabled). The JAS site masks this by showing success optimistically on redirect; our app is
+   stricter (activates only on a verified webhook), so the gap surfaces. **THE FIX = ask Grow/Meshulam
+   support to enable server-to-server notifications for the terminal** (or, if API keys are ever
+   obtained, build confirmation-page polling via `getPaymentStatus`). Meanwhile use `adminMarkPaid`.
+   Our activation path is proven working (the manual button runs the same verified path →
+   `giftcard.activated`); the ONLY missing link is Grow *sending* the callback.
+   `processVerifiedPaymentEvent` audits every outcome (`payment.webhook_<code>`) so any callback that
+   DOES arrive-but-doesn't-activate (e.g. `amount_mismatch`) is visible in the card log.
 9. **Wix DNS limits dictate the email provider.** Wix **cannot** create subdomain MX records and
    **locks nameservers** on Wix-registered domains (can't move DNS to Cloudflare). Resend REQUIRES a
    `send` subdomain MX → impossible on Wix. **SendGrid** authenticates via **CNAME** (Sender
@@ -158,13 +168,20 @@ Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile 
 
 ## Status of the live-launch items
 
-- **Grow payments** — ✅ real charge + receipt confirmed via Make. ⚠️ auto-activation callback still
-  flaky on the custom domain (gotcha #8); use raw Vercel notify URL or `adminMarkPaid` meanwhile.
-- **Email (SendGrid)** — ✅ domain authenticated, adapter live. Confirm a real card email lands
-  (`/admin → שליחה מחדש`). Free plan = 100/day.
+- **Grow payments** — ✅ real ₪1 charge + receipt confirmed via Make. ⚠️ auto-activation callback
+  **never arrives** (gotcha #8c) — NOT a domain issue; Grow isn't sending server notifications for
+  the terminal. **Action: Grow/Meshulam support must enable server-to-server notifications.** Use
+  `adminMarkPaid` ("סימון כשולם והפעלה") meanwhile. App side is proven working.
+- **Email (SendGrid)** — ✅✅ **DONE + confirmed live** (real card email received in the inbox).
+  Free plan = 100/day.
+- **₪1 test mode** — ✅ works. Set via `/admin → הגדרות` (min amount = 1) or SQL
+  `update system_settings set min_amount_minor=100 where id=1;`. **Revert to 5000 (₪50) before launch.**
 - **Green Invoice (accounting)** — ⏳ adapter implemented, still `RECEIPT_PROVIDER=mock`; sandbox-test
   and set `GREENINVOICE_DOC_TYPE` per the accountant, then flip to `greeninvoice`.
-- **Remaining non-code work:** legal/privacy review; Hebrew PDF font drop-in at
-  `public/fonts/NotoSansHebrew-Regular.ttf`; revert `min amount` 1 → 50 before launch; add the
-  "Buy a Gift Card" button on the Wix site; rotate any secrets shared in chat; Sentry DSN; Supabase
-  backups. Optional code: an in-`/admin` staff-management page (invite by email + role) to avoid SQL.
+- **Settings save** — fixed: it silently swallowed DB write errors + didn't revalidate the public
+  funnel; now surfaces errors and revalidates `/gift-cards` + `/`.
+- **Remaining non-code work:** update `businessEmail`→`justasecondil2@gmail.com` + real store phone in
+  settings; legal/privacy review; Hebrew PDF font drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`;
+  revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on the Wix site; rotate
+  any secrets shared in chat; Sentry DSN; Supabase backups. Optional code: an in-`/admin`
+  staff-management page (invite by email + role) to avoid SQL.
