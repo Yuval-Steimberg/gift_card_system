@@ -161,6 +161,17 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     via `new URL()` with a localhost fallback — a mistyped provider var or base URL must never throw
     (it once white-screened `/admin` because auth calls `serverEnv` on a hot path — see gotcha #3).
 
+## Performance (admin felt slow — fixed; keep these)
+
+- **`loading.tsx` per area** (`app/admin`, `app/gift-cards`, `app/employee`, `app/gift/[token]`)
+  streams an instant skeleton so navigation isn't a frozen page while `force-dynamic` pages fetch.
+- **`getCurrentUser()` is wrapped in React `cache()`** — the layout + page + actions in one request
+  share ONE auth resolution instead of each re-hitting Supabase.
+- **`supabaseCurrentUser()` parallelizes** its roles + store-location lookups.
+- **No N+1 on the dashboard:** `getAdminStats` uses `store.countCardsWithFailedDelivery()` (one
+  aggregate query) instead of looping `getDeliveryJobs(cardId)` per card. (Still loads all cards to
+  sum totals in JS — fine for hundreds; move to a SQL aggregate if it reaches thousands.)
+
 ## Responsive
 
 Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile section nav
