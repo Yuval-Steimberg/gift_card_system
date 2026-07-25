@@ -166,6 +166,14 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile section nav
 (sidebar is desktop-only); tables use `min-w` + `whitespace-nowrap` to scroll instead of squish.
 
+## Cross-browser QR scanner
+
+`components/employee/qr-scanner.tsx` decodes QR **in every browser**: native `BarcodeDetector`
+when present (Chrome/Android), else a pure-JS `jsQR` fallback that reads camera frames off a
+canvas (Safari + Firefox — neither implements BarcodeDetector). Requires `getUserMedia` (camera
+over HTTPS); manual code entry is always the ultimate fallback. Desktops without a webcam use
+manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path — Safari breaks.)
+
 ## Status of the live-launch items
 
 - **Grow payments** — ✅ real ₪1 charge + receipt confirmed via Make. ⚠️ auto-activation callback
