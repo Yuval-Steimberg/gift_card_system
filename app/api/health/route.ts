@@ -27,6 +27,9 @@ export async function GET() {
       MAKE_WEBHOOK_URL_SET: Boolean(process.env.MAKE_WEBHOOK_URL),
       GROW_KEYS_SET: Boolean(process.env.GROW_API_KEY && process.env.GROW_API_SECRET),
       EMAIL_PROVIDER: process.env.EMAIL_PROVIDER ?? 'log',
+      RESEND_KEY_SET: Boolean(process.env.RESEND_API_KEY),
+      SENDGRID_KEY_SET: Boolean(process.env.SENDGRID_API_KEY),
+      EMAIL_FROM: process.env.EMAIL_FROM ?? '(default)',
       RECEIPT_PROVIDER: process.env.RECEIPT_PROVIDER ?? 'mock',
       APP_BASE_URL: Boolean(process.env.APP_BASE_URL),
       // Which staff password applies on THIS running deployment:

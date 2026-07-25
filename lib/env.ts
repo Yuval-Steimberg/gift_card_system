@@ -47,9 +47,12 @@ const rawServerSchema = z.object({
   // set, checkout goes through the Make scenario; otherwise the direct Grow API.
   MAKE_WEBHOOK_URL: z.string().optional(),
 
-  EMAIL_PROVIDER: z.enum(['log', 'resend']).default('log'),
+  EMAIL_PROVIDER: z.enum(['log', 'resend', 'sendgrid']).default('log'),
   EMAIL_FROM: z.string().default('Just A Second <gifts@example.com>'),
   RESEND_API_KEY: z.string().optional(),
+  // SendGrid authenticates the sending domain via CNAME records (no MX needed),
+  // so it works on DNS hosts that block subdomain MX (e.g. Wix).
+  SENDGRID_API_KEY: z.string().optional(),
 
   RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).default('mock'),
   GREENINVOICE_API_URL: z.string().optional(),
