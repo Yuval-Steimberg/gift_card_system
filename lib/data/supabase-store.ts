@@ -505,7 +505,15 @@ export class SupabaseStore implements GiftCardStore {
     if (patch.termsUrl !== undefined) map.terms_url = patch.termsUrl
     if (patch.defaultLanguage !== undefined) map.default_language = patch.defaultLanguage
     const { data: existing } = await this.db.from('system_settings').select('id').limit(1).maybeSingle()
-    if (existing) await this.db.from('system_settings').update(map).eq('id', existing.id)
+    // Surface write failures instead of silently reporting success (a swallowed
+    // error here meant "settings saved" showed but nothing changed).
+    if (existing) {
+      const { error } = await this.db.from('system_settings').update(map).eq('id', existing.id)
+      if (error) throw new Error(`system_settings update failed: ${error.message}`)
+    } else {
+      const { error } = await this.db.from('system_settings').insert({ id: 1, ...map })
+      if (error) throw new Error(`system_settings insert failed: ${error.message}`)
+    }
     await this.appendAudit({ actorId: audit.actorId, actorRole: audit.actorRole, action: 'settings.update', entityType: 'settings', entityId: 'system', reason: null, metadata: { keys: Object.keys(patch) } })
     return this.getSettings()
   }

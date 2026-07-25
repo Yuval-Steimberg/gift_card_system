@@ -180,8 +180,15 @@ export async function adminUpdateSettings(patch: Record<string, unknown>): Promi
   if (typeof patch.minAmountMinor === 'number') clean.minAmountMinor = patch.minAmountMinor
   if (typeof patch.maxAmountMinor === 'number') clean.maxAmountMinor = patch.maxAmountMinor
   if (patch.expiryMonths === null || typeof patch.expiryMonths === 'number') clean.expiryMonths = patch.expiryMonths
-  await getStore().updateSettings(clean, { actorId: user.id, actorRole: user.role })
+  try {
+    await getStore().updateSettings(clean, { actorId: user.id, actorRole: user.role })
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'שמירת ההגדרות נכשלה' }
+  }
   revalidatePath('/admin/settings')
+  // Also refresh the public funnel + landing so amount limits/presets take effect there.
+  revalidatePath('/gift-cards')
+  revalidatePath('/')
   return { ok: true }
 }
 
