@@ -21,10 +21,32 @@ interface Props {
 
 const STEPS = ['סכום', 'עיצוב', 'הרוכש', 'הנמען', 'ברכה', 'מועד', 'סיכום'] as const
 
+/** Which wizard step each server-validated field lives on (to jump there on error). */
+const FIELD_STEP: Record<string, number> = {
+  amountMinor: 0,
+  templateId: 1,
+  buyerName: 2, buyerEmail: 2, buyerPhone: 2, buyerCompany: 2, buyerTaxId: 2,
+  recipientName: 3, recipientEmail: 3, recipientPhone: 3, recipientLanguage: 3,
+  greeting: 4,
+  deliveryTiming: 5, scheduledDeliveryAt: 5,
+  acceptedTerms: 6,
+}
+
+/** Human-readable Hebrew label per field, for a clear "what's missing" message. */
+const FIELD_LABEL: Record<string, string> = {
+  amountMinor: 'סכום', templateId: 'עיצוב',
+  buyerName: 'שם הרוכש/ת', buyerEmail: 'אימייל הרוכש/ת', buyerPhone: 'טלפון הרוכש/ת',
+  buyerCompany: 'שם חברה', buyerTaxId: 'ח.פ / ע.מ',
+  recipientName: 'שם הנמען/ת', recipientEmail: 'אימייל הנמען/ת', recipientPhone: 'טלפון הנמען/ת',
+  greeting: 'ברכה', deliveryTiming: 'מועד משלוח', scheduledDeliveryAt: 'מועד משלוח',
+  acceptedTerms: 'אישור תנאי השובר',
+}
+
 export function PurchaseWizard({ templates, settings }: Props) {
   const [step, setStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   // form state
   const [amountMinor, setAmountMinor] = useState<number>(settings.presetAmountsMinor[1] ?? settings.minAmountMinor)
@@ -52,6 +74,12 @@ export function PurchaseWizard({ templates, settings }: Props) {
 
   const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
   const phoneOk = (v: string) => normalizeIsraeliPhone(v) !== null
+  // Recipient phone is OPTIONAL, but if present must match the server rule
+  // (empty or 9–12 digits) — otherwise the server rejects the whole purchase.
+  const recipientPhoneOk = (v: string) => {
+    const d = v.replace(/\D+/g, '')
+    return d === '' || (d.length >= 9 && d.length <= 12)
+  }
 
   function stepValid(i: number): boolean {
     switch (i) {
@@ -62,7 +90,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
       case 2:
         return buyerName.trim().length >= 2 && emailOk(buyerEmail) && phoneOk(buyerPhone)
       case 3:
-        return recipientName.trim().length >= 2 && emailOk(recipientEmail)
+        return recipientName.trim().length >= 2 && emailOk(recipientEmail) && recipientPhoneOk(recipientPhone)
       case 4:
         return greeting.length <= settings.greetingMaxLength
       case 5:
@@ -85,6 +113,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
   async function submit() {
     setSubmitting(true)
     setServerError(null)
+    setFieldErrors({})
     const scheduledDeliveryAt =
       deliveryTiming === 'scheduled' && scheduledLocal ? new Date(scheduledLocal).toISOString() : null
     try {
@@ -112,6 +141,15 @@ export function PurchaseWizard({ templates, settings }: Props) {
       })
       if (res.ok && res.redirectUrl) {
         window.location.href = res.redirectUrl
+        return
+      }
+      // Show exactly which fields are wrong and jump to the earliest step
+      // containing an error, so the buyer isn't left guessing on the summary.
+      if (res.fieldErrors && Object.keys(res.fieldErrors).length > 0) {
+        setFieldErrors(res.fieldErrors)
+        const firstStep = Math.min(...Object.keys(res.fieldErrors).map((f) => FIELD_STEP[f] ?? 6))
+        setStep(firstStep)
+        setServerError(res.message ?? 'יש לתקן את השדות המסומנים.')
         return
       }
       setServerError(res.message ?? 'אירעה שגיאה. נסו שוב.')
@@ -147,6 +185,20 @@ export function PurchaseWizard({ templates, settings }: Props) {
             </li>
           ))}
         </ol>
+
+        {Object.keys(fieldErrors).length > 0 && (
+          <div role="alert" className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <p className="font-semibold">יש לתקן את הפרטים הבאים:</p>
+            <ul className="mt-1 list-disc pe-5">
+              {Object.entries(fieldErrors).map(([f, msg]) => (
+                <li key={f}>
+                  {FIELD_LABEL[f] ?? f}
+                  {msg ? ` — ${msg}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="min-h-[320px] rounded-lg border border-border bg-card p-6 shadow-jas-1 animate-fade-up">
           {step === 0 && (
@@ -250,6 +302,9 @@ export function PurchaseWizard({ templates, settings }: Props) {
               <Field label="שם הנמען/ת" value={recipientName} onChange={setRecipientName} required />
               <Field label="אימייל הנמען/ת" type="email" dir="ltr" value={recipientEmail} onChange={setRecipientEmail} required />
               <Field label="טלפון (לא חובה)" type="tel" dir="ltr" value={recipientPhone} onChange={setRecipientPhone} />
+              {recipientPhone.trim().length > 0 && !recipientPhoneOk(recipientPhone) && (
+                <p className="text-xs text-destructive">מספר טלפון לא תקין — השאר/י ריק או הזן/י מספר בן 9–12 ספרות.</p>
+              )}
               <div className="space-y-1.5">
                 <Label>שפת השובר</Label>
                 <div className="flex gap-2">
