@@ -402,6 +402,12 @@ export class SupabaseStore implements GiftCardStore {
     return (data ?? []).map((r) => this.toJob(r))
   }
 
+  async countCardsWithFailedDelivery(): Promise<number> {
+    // One query: distinct gift cards with a failed delivery job.
+    const { data } = await this.db.from('delivery_jobs').select('gift_card_id').eq('status', 'failed')
+    return new Set((data ?? []).map((r) => r.gift_card_id)).size
+  }
+
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {
     const { data, error } = await this.db.rpc('claim_due_delivery_jobs', { p_now: now, p_limit: limit })
     if (error) throw error

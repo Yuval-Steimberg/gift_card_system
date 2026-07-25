@@ -199,6 +199,9 @@ export interface GiftCardStore {
   // delivery
   createDeliveryJob(giftCardId: string, channel: 'email' | 'sms' | 'whatsapp', scheduledFor: string | null): Promise<DeliveryJob>
   getDeliveryJobs(giftCardId: string): Promise<DeliveryJob[]>
+  /** Count of distinct gift cards that have at least one failed delivery job
+   *  (one aggregate query — avoids an N+1 over every card on the dashboard). */
+  countCardsWithFailedDelivery(): Promise<number>
   claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]>
   markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void>
 

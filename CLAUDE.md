@@ -166,6 +166,19 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile section nav
 (sidebar is desktop-only); tables use `min-w` + `whitespace-nowrap` to scroll instead of squish.
 
+## Checkout field validation (hardened — don't loosen without reason)
+
+`lib/validation/purchase.ts` is the source of truth (Zod), mirrored client-side in
+`components/checkout/purchase-wizard.tsx` and backstopped in `lib/payments/grow.ts`:
+- **buyerName + recipientName** must be a **real full name** (first + last, Hebrew/Latin letters
+  only, no digits/symbols) via shared `isFullName()`. Grow 427-rejects a bad `fullName`, so this is
+  load-bearing — a single word / digits / empty name is exactly what caused `pageFieldSettings[fullName]`.
+- **buyerPhone + recipientPhone** are **required** valid Israeli mobiles (recipient phone was made
+  required per the owner; flip back to optional-but-validated if conversion suffers).
+- The wizard blocks advancing per step, shows inline errors as you type, and on any server
+  rejection **names the exact field(s) + jumps to the failing step** (no more dead-end generic
+  "יש לתקן את השדות המסומנים" on the summary). Tests: `tests/unit/purchase-validation.test.ts`.
+
 ## Cross-browser QR scanner
 
 `components/employee/qr-scanner.tsx` decodes QR **in every browser**: native `BarcodeDetector`

@@ -77,11 +77,8 @@ export async function getAdminStats(): Promise<AdminStats> {
       stats.expiringSoon++
     }
   }
-  // failed deliveries
-  for (const c of items) {
-    const jobs = await store.getDeliveryJobs(c.id)
-    if (jobs.some((j) => j.status === 'failed')) stats.failedDeliveries++
-  }
+  // failed deliveries — one aggregate query instead of one lookup per card.
+  stats.failedDeliveries = await store.countCardsWithFailedDelivery()
   return stats
 }
 

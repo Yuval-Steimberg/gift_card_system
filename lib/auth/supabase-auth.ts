@@ -66,14 +66,18 @@ export async function supabaseCurrentUser(): Promise<AppUser | null> {
     .maybeSingle()
   if (!profile || !profile.is_active) return null
 
-  const { data: roleRows } = await supabase.from('user_roles').select('role').eq('profile_id', profile.id)
-  const roles = (roleRows ?? []).map((r) => r.role as Role)
+  // The roles lookup and the default-store lookup are independent — run them in
+  // parallel instead of serially (this path runs on every admin page load).
+  const [roleRes, locRes] = await Promise.all([
+    supabase.from('user_roles').select('role').eq('profile_id', profile.id),
+    // Default the acting store to the first active location (profiles carry no
+    // location in the MVP schema); redemption records this on each transaction.
+    supabase.from('store_locations').select('id').eq('is_active', true).limit(1).maybeSingle(),
+  ])
+  const roles = (roleRes.data ?? []).map((r) => r.role as Role)
   const role = ROLE_PRIORITY.find((r) => roles.includes(r))
   if (!role) return null
-
-  // Default the acting store to the first active location (profiles carry no
-  // location in the MVP schema); redemption records this on each transaction.
-  const { data: loc } = await supabase.from('store_locations').select('id').eq('is_active', true).limit(1).maybeSingle()
+  const loc = locRes.data
 
   return {
     id: profile.id,

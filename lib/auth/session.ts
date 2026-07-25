@@ -1,4 +1,5 @@
 import 'server-only'
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { serverEnv, isSupabaseConfigured } from '@/lib/env'
@@ -84,7 +85,11 @@ export async function logout(): Promise<void> {
 }
 
 /** Resolve the current authenticated user (Supabase session or demo cookie). */
-export async function getCurrentUser(): Promise<AppUser | null> {
+// Wrapped in React `cache()` so the layout, the page, and any server action in
+// the SAME request share one auth resolution instead of each re-hitting Supabase
+// (the layout's requireRole + a page's requireRole would otherwise double the
+// auth round-trips on every navigation).
+export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
   if (isSupabaseConfigured()) return supabaseCurrentUser()
   const token = cookies().get(COOKIE)?.value
   if (!token) return null
@@ -94,4 +99,4 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   // Deactivated mid-session -> treated as logged out.
   if (!user || !user.active) return null
   return user
-}
+})

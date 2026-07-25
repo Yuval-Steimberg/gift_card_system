@@ -631,6 +631,12 @@ export class MemoryStore implements GiftCardStore {
       .map((j) => ({ ...j }))
   }
 
+  async countCardsWithFailedDelivery(): Promise<number> {
+    const failed = new Set<string>()
+    for (const j of this.deliveryJobs.values()) if (j.status === 'failed') failed.add(j.giftCardId)
+    return failed.size
+  }
+
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {
     const nowMs = new Date(now).getTime()
     const due: DeliveryJob[] = []
