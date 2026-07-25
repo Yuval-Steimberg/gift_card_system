@@ -37,7 +37,10 @@ const rawServerSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
 
-  PAYMENT_PROVIDER: z.enum(['mock', 'grow']).default('mock'),
+  // .catch() (not just .default()) so an invalid/mistyped value falls back to a
+  // safe default instead of throwing — serverEnv() runs on the auth hot path and
+  // must never crash the whole app because one provider var has a typo (gotcha #3).
+  PAYMENT_PROVIDER: z.enum(['mock', 'grow']).catch('mock'),
   PAYMENT_WEBHOOK_SECRET: z.string().default('dev-payment-webhook-secret-change-me'),
   GROW_API_URL: z.string().optional(),
   GROW_API_KEY: z.string().optional(),
@@ -47,14 +50,14 @@ const rawServerSchema = z.object({
   // set, checkout goes through the Make scenario; otherwise the direct Grow API.
   MAKE_WEBHOOK_URL: z.string().optional(),
 
-  EMAIL_PROVIDER: z.enum(['log', 'resend', 'sendgrid']).default('log'),
+  EMAIL_PROVIDER: z.enum(['log', 'resend', 'sendgrid']).catch('log'),
   EMAIL_FROM: z.string().default('Just A Second <gifts@example.com>'),
   RESEND_API_KEY: z.string().optional(),
   // SendGrid authenticates the sending domain via CNAME records (no MX needed),
   // so it works on DNS hosts that block subdomain MX (e.g. Wix).
   SENDGRID_API_KEY: z.string().optional(),
 
-  RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).default('mock'),
+  RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).catch('mock'),
   GREENINVOICE_API_URL: z.string().optional(),
   GREENINVOICE_API_KEY: z.string().optional(),
   GREENINVOICE_API_SECRET: z.string().optional(),
