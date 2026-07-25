@@ -16,6 +16,7 @@ Hebrew-first (RTL), bilingual.
 Next.js 14 (App Router) · React 18 · TypeScript (strict) · Tailwind + JAS design tokens ·
 Radix primitives · Zod · Supabase/PostgreSQL (RLS + plpgsql atomic functions) · pdf-lib · qrcode ·
 Vitest · Playwright · ESLint/Prettier · GitHub Actions.
+Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Green Invoice (mock).
 
 ## Non-negotiable architecture rules
 
@@ -44,6 +45,10 @@ Vitest · Playwright · ESLint/Prettier · GitHub Actions.
   ledger, PDF, QR, service (orchestration), admin-service (stats + lifecycle).
 - `lib/data/` — store interface, MemoryStore, SupabaseStore, supabase-client, seed-data.
 - `lib/payments|delivery/email|accounting/` — provider interfaces + mock + real adapters + factory.
+  Email adapters: `log`, `resend` (abandoned — needs subdomain MX), **`sendgrid`** (live; CNAME auth).
+- `app/admin/actions.ts` — `adminMarkPaid` (manual "mark paid & activate" for a paid card whose
+  webhook never landed; runs the same verified-activation path). `components/admin/card-actions.tsx`
+  shows the **"סימון כשולם והפעלה"** button on pre-activation cards.
 - `lib/auth/` — **dual-mode auth**: Supabase Auth (`supabase-auth.ts` + root `middleware.ts`) when
   Supabase is configured; demo cookie auth (`session.ts`/`users.ts`) offline. Roles from `user_roles`.
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
@@ -63,16 +68,46 @@ npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycl
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
 ```
 
-## Current deployment state (test/demo)
+## Current deployment state (LIVE test/demo, real payments proven)
 
 - **Hosting:** Vercel, production branch = `claude/gift-card-system-build-0oflq7`. Live at
-  `gift-card-system-8i8e.vercel.app` (custom domain not yet attached).
+  `gift-card-system-8i8e.vercel.app` **and the custom domain `gift.justasecond.co.il`** (attached, blue-check in Vercel).
 - **DB:** Supabase project configured; migrations + seed run; `/api/health` → `ok:true`.
-- **Payments:** `PAYMENT_PROVIDER=mock` (no real charges).
-- **Email:** `EMAIL_PROVIDER=resend` (verify the key/domain with `verify:email`).
-- **Auth:** demo cookie auth. Staff login `owner@justasecond.example` + `AUTH_DEMO_PASSWORD`.
+- **Payments:** `PAYMENT_PROVIDER=grow` via the **JAS Make.com scenario** (`MAKE_WEBHOOK_URL` set;
+  `GROW_*` API keys NOT set — everything goes through Make). A **real ₪-charge was completed
+  end-to-end** (Grow charged the card + issued a receipt). ⚠️ The one open item is Grow's
+  server-to-server callback (see gotcha #8) — until it lands automatically, activate paid cards
+  with the admin **"סימון כשולם והפעלה"** button (`adminMarkPaid`).
+- **Email:** `EMAIL_PROVIDER=sendgrid` + `SENDGRID_API_KEY`. **Resend was abandoned** — it needs a
+  `send` subdomain **MX** record and Wix DNS cannot create subdomain MX (gotcha #9). SendGrid
+  authenticates the domain with **CNAME** records (Wix supports those); `justasecond.co.il` is
+  **domain-authenticated in SendGrid**. `EMAIL_FROM="Just A Second <gifts@justasecond.co.il>"`
+  (keep the closing `>`). Adapter: `lib/delivery/email/sendgrid.ts` (unit-tested).
+- **Receipt/accounting:** `RECEIPT_PROVIDER=mock` (Green Invoice still unverified). NOTE: this var
+  only accepts `mock`|`greeninvoice` — do NOT put `sendgrid` here (that once white-screened admin; now
+  guarded, gotcha #3/env `.catch`).
+- **Auth (prod):** **Supabase Auth**, NOT the demo accounts. `owner@justasecond.example` +
+  `AUTH_DEMO_PASSWORD` ONLY works offline; on the live deploy `login()` routes to Supabase Auth.
+  Staff = a Supabase Auth user linked to a `profiles` row + a `user_roles` row (see "Adding staff").
+- **₪1 test mode:** `/admin → הגדרות` set **min amount = 1** (custom amounts already on) to buy a
+  ₪1 card through the real Grow flow. Revert min to 50 before public launch.
 - **Cron:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit). Immediate delivery
   doesn't need cron.
+
+### Adding staff (production / Supabase Auth)
+1. Supabase → Authentication → Users → **Add user** (email + password, ✅ Auto Confirm).
+2. Supabase → SQL Editor: link the auth user to a profile + role (most-privileged role wins):
+   ```sql
+   with au as (select id, email from auth.users where email='them@x.com'),
+   prof as (insert into profiles (auth_user_id, email, full_name, is_active)
+            select au.id, au.email, 'Full Name', true from au
+            on conflict (email) do update set auth_user_id=excluded.auth_user_id, is_active=true
+            returning id)
+   insert into user_roles (profile_id, role) select prof.id, 'owner' from prof
+   on conflict (profile_id, role) do nothing;
+   ```
+   Roles: `owner`/`admin` = full; `store_manager`, `store_employee` (redemption only), `finance`.
+   Deactivate = delete the auth user or set `profiles.is_active=false`. (No in-app staff UI yet.)
 
 To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCTION.md`.
 
@@ -96,19 +131,40 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 6. **Static prerender vs runtime env/DB.** Pages that read settings/DB are `export const dynamic =
    'force-dynamic'` so the build never depends on runtime env or a live DB.
 7. **Vercel Hobby crons are daily only** (`0 9 * * *`); `*/5` needs Pro.
+8. **Grow via Make: three traps.** (a) The JAS Make scenario **hardcodes** notify/success/invoice
+   URLs to `just-a-second-website.vercel.app` — for gift cards those MUST be the gift app's URLs
+   (`{...}/api/webhooks/payment`, `{...}/checkout/confirmation?ref={order_ref}`), else a paid card
+   never activates. (b) Grow rejects an **empty Full Name/phone** with `427 pageFieldSettings[fullName][value]`
+   / "Missing parameter 'phone'"; buyer name+phone are now required + guarded in `grow.ts` before
+   the Make call. (c) Grow's **server-to-server callback** to the custom domain `gift.justasecond.co.il`
+   (Wix DNS) may not arrive even when payment succeeds — the browser redirect works but the POST
+   doesn't. Point the Make module's notify URL at the **raw Vercel domain**
+   (`gift-card-system-8i8e.vercel.app/api/webhooks/payment`), or use the admin `adminMarkPaid`
+   button. `processVerifiedPaymentEvent` now audits every outcome (`payment.webhook_<code>`) so a
+   callback that arrives-but-doesn't-activate (e.g. `amount_mismatch`) is visible in the card log.
+9. **Wix DNS limits dictate the email provider.** Wix **cannot** create subdomain MX records and
+   **locks nameservers** on Wix-registered domains (can't move DNS to Cloudflare). Resend REQUIRES a
+   `send` subdomain MX → impossible on Wix. **SendGrid** authenticates via **CNAME** (Sender
+   Authentication), which Wix supports → that's why email is SendGrid. Same reason a full Cloudflare
+   migration was attempted and abandoned (nameservers not editable in Wix).
+10. **`serverEnv()` enums use `.catch(default)`** (not just `.default`) + `APP_BASE_URL` is validated
+    via `new URL()` with a localhost fallback — a mistyped provider var or base URL must never throw
+    (it once white-screened `/admin` because auth calls `serverEnv` on a hot path — see gotcha #3).
 
 ## Responsive
 
 Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile section nav
 (sidebar is desktop-only); tables use `min-w` + `whitespace-nowrap` to scroll instead of squish.
 
-## Known limitations (still mock/unverified — see production guide)
+## Status of the live-launch items
 
-- Grow payment adapter **mirrors the existing JAS website exactly** (Make.com scenario → Grow, with
-  a direct Grow REST fallback; same fields + webhook parsing; unit-tested in `tests/unit/grow.test.ts`)
-  but still needs a **live transaction test** before launch. Set `PAYMENT_PROVIDER=grow` + `GROW_*`
-  (+ optional `MAKE_WEBHOOK_URL`). Green Invoice receipt adapter is **implemented** (token +
-  create-document) but likewise **unverified live** — sandbox-test it and set `GREENINVOICE_DOC_TYPE`
-  per the accountant. Supabase Auth is implemented (dual-mode). Sentry reporting + CSP are wired.
-  Remaining non-code work: legal/privacy review, live payment + accounting tests, Hebrew PDF font
-  drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`.
+- **Grow payments** — ✅ real charge + receipt confirmed via Make. ⚠️ auto-activation callback still
+  flaky on the custom domain (gotcha #8); use raw Vercel notify URL or `adminMarkPaid` meanwhile.
+- **Email (SendGrid)** — ✅ domain authenticated, adapter live. Confirm a real card email lands
+  (`/admin → שליחה מחדש`). Free plan = 100/day.
+- **Green Invoice (accounting)** — ⏳ adapter implemented, still `RECEIPT_PROVIDER=mock`; sandbox-test
+  and set `GREENINVOICE_DOC_TYPE` per the accountant, then flip to `greeninvoice`.
+- **Remaining non-code work:** legal/privacy review; Hebrew PDF font drop-in at
+  `public/fonts/NotoSansHebrew-Regular.ttf`; revert `min amount` 1 → 50 before launch; add the
+  "Buy a Gift Card" button on the Wix site; rotate any secrets shared in chat; Sentry DSN; Supabase
+  backups. Optional code: an in-`/admin` staff-management page (invite by email + role) to avoid SQL.
