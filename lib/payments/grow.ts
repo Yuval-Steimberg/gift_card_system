@@ -1,5 +1,5 @@
 import { toMajor } from '@/lib/money'
-import { normalizeIsraeliPhone } from '@/lib/validation/purchase'
+import { normalizeIsraeliPhone, isFullName } from '@/lib/validation/purchase'
 import {
   WebhookVerificationError,
   type CheckoutSession,
@@ -72,8 +72,8 @@ export class GrowPaymentProvider implements PaymentProvider {
     if (!phone) {
       throw new Error('מספר טלפון לא תקין — נדרש מספר נייד ישראלי תקין (למשל 0501234567)')
     }
-    if (name.length < 2) {
-      throw new Error('נא להזין שם מלא של הרוכש (שם פרטי ושם משפחה)')
+    if (!isFullName(name)) {
+      throw new Error('שם הרוכש חייב להיות שם מלא — שם פרטי ושם משפחה, אותיות בלבד (Grow דוחה שם לא תקין)')
     }
 
     // Grow expects a major-unit amount (shekels), like the reference.

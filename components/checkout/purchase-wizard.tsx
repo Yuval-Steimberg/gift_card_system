@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { GiftCardPreview } from '@/components/gift-card/gift-card-preview'
 import { formatMoney, parseMajorToMinor } from '@/lib/money'
-import { normalizeIsraeliPhone } from '@/lib/validation/purchase'
+import { normalizeIsraeliPhone, isFullName } from '@/lib/validation/purchase'
 import { cn } from '@/lib/utils'
 import { Check, ChevronLeft, ChevronRight, Loader } from '@/components/icons'
 import { startPurchase } from '@/app/actions/purchase'
@@ -74,12 +74,9 @@ export function PurchaseWizard({ templates, settings }: Props) {
 
   const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
   const phoneOk = (v: string) => normalizeIsraeliPhone(v) !== null
-  // Recipient phone is OPTIONAL, but if present must match the server rule
-  // (empty or 9–12 digits) — otherwise the server rejects the whole purchase.
-  const recipientPhoneOk = (v: string) => {
-    const d = v.replace(/\D+/g, '')
-    return d === '' || (d.length >= 9 && d.length <= 12)
-  }
+  // Full name = first + last, letters only. Shared with the server so the
+  // client blocks exactly what Grow would reject (427 on fullName).
+  const nameOk = (v: string) => isFullName(v)
 
   function stepValid(i: number): boolean {
     switch (i) {
@@ -88,9 +85,9 @@ export function PurchaseWizard({ templates, settings }: Props) {
       case 1:
         return Boolean(templateId)
       case 2:
-        return buyerName.trim().length >= 2 && emailOk(buyerEmail) && phoneOk(buyerPhone)
+        return nameOk(buyerName) && emailOk(buyerEmail) && phoneOk(buyerPhone)
       case 3:
-        return recipientName.trim().length >= 2 && emailOk(recipientEmail) && recipientPhoneOk(recipientPhone)
+        return nameOk(recipientName) && emailOk(recipientEmail) && phoneOk(recipientPhone)
       case 4:
         return greeting.length <= settings.greetingMaxLength
       case 5:
@@ -276,8 +273,14 @@ export function PurchaseWizard({ templates, settings }: Props) {
           {step === 2 && (
             <fieldset className="space-y-4">
               <legend className="text-lg font-bold">פרטי הרוכש/ת</legend>
-              <Field label="שם מלא" value={buyerName} onChange={setBuyerName} required />
+              <Field label="שם מלא (פרטי ומשפחה)" value={buyerName} onChange={setBuyerName} required />
+              {buyerName.trim().length > 0 && !nameOk(buyerName) && (
+                <p className="text-sm text-destructive">נא להזין שם פרטי ושם משפחה, אותיות בלבד (ללא מספרים).</p>
+              )}
               <Field label="אימייל" type="email" dir="ltr" value={buyerEmail} onChange={setBuyerEmail} required />
+              {buyerEmail.length > 0 && !emailOk(buyerEmail) && (
+                <p className="text-sm text-destructive">כתובת אימייל לא תקינה.</p>
+              )}
               <Field label="טלפון (נייד ישראלי)" type="tel" dir="ltr" value={buyerPhone} onChange={setBuyerPhone} required />
               {buyerPhone.length > 0 && !phoneOk(buyerPhone) && (
                 <p className="text-sm text-destructive">מספר טלפון ישראלי לא תקין (למשל 0501234567)</p>
@@ -299,11 +302,17 @@ export function PurchaseWizard({ templates, settings }: Props) {
           {step === 3 && (
             <fieldset className="space-y-4">
               <legend className="text-lg font-bold">פרטי הנמען/ת</legend>
-              <Field label="שם הנמען/ת" value={recipientName} onChange={setRecipientName} required />
+              <Field label="שם הנמען/ת (פרטי ומשפחה)" value={recipientName} onChange={setRecipientName} required />
+              {recipientName.trim().length > 0 && !nameOk(recipientName) && (
+                <p className="text-xs text-destructive">נא להזין שם פרטי ושם משפחה, אותיות בלבד (ללא מספרים).</p>
+              )}
               <Field label="אימייל הנמען/ת" type="email" dir="ltr" value={recipientEmail} onChange={setRecipientEmail} required />
-              <Field label="טלפון (לא חובה)" type="tel" dir="ltr" value={recipientPhone} onChange={setRecipientPhone} />
-              {recipientPhone.trim().length > 0 && !recipientPhoneOk(recipientPhone) && (
-                <p className="text-xs text-destructive">מספר טלפון לא תקין — השאר/י ריק או הזן/י מספר בן 9–12 ספרות.</p>
+              {recipientEmail.length > 0 && !emailOk(recipientEmail) && (
+                <p className="text-xs text-destructive">כתובת אימייל לא תקינה.</p>
+              )}
+              <Field label="טלפון נייד (נייד ישראלי)" type="tel" dir="ltr" value={recipientPhone} onChange={setRecipientPhone} required />
+              {recipientPhone.trim().length > 0 && !phoneOk(recipientPhone) && (
+                <p className="text-xs text-destructive">מספר טלפון ישראלי לא תקין (למשל 0501234567).</p>
               )}
               <div className="space-y-1.5">
                 <Label>שפת השובר</Label>

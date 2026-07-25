@@ -7,12 +7,30 @@ import { z } from 'zod'
  */
 
 const emailSchema = z.string().trim().email('כתובת אימייל לא תקינה').max(254)
-const nameSchema = z.string().trim().min(2, 'נא להזין שם').max(120)
-const phoneSchema = z
+
+/** Matches a real full name: first + last, Hebrew/Latin letters only (plus
+ * space, hyphen, apostrophe, period) — NO digits or symbols. Grow rejects
+ * anything else on `pageFieldSettings[fullName]` (HTTP 427). */
+const FULL_NAME_RE = /^\p{L}+(?:[\s'’.\-]\p{L}+)+$/u
+export function isFullName(v: string): boolean {
+  return FULL_NAME_RE.test(v.trim().replace(/\s+/g, ' '))
+}
+
+/** Required full name (first + last), used for both buyer and recipient. */
+const fullNameSchema = z
   .string()
   .trim()
-  .transform((v) => v.replace(/\D+/g, ''))
-  .refine((v) => v === '' || (v.length >= 9 && v.length <= 12), 'מספר טלפון לא תקין')
+  .min(2, 'נא להזין שם מלא')
+  .max(120)
+  .transform((v) => v.replace(/\s+/g, ' '))
+  .refine((v) => FULL_NAME_RE.test(v), 'נא להזין שם פרטי ושם משפחה (אותיות בלבד, ללא מספרים)')
+
+/** Required Israeli mobile — normalizes then validates (9–10 digits). */
+const requiredIsraeliPhone = z
+  .string()
+  .trim()
+  .min(1, 'נא להזין מספר טלפון')
+  .refine((v) => normalizeIsraeliPhone(v) !== null, 'מספר טלפון ישראלי לא תקין (למשל 0501234567)')
 
 /** Israeli phone normalization mirrored from the reference site. */
 export function normalizeIsraeliPhone(raw: string): string | null {
@@ -27,24 +45,22 @@ export const purchaseInputSchema = z.object({
   amountMinor: z.number().int().positive(),
   templateId: z.string().min(1, 'נא לבחור עיצוב'),
 
-  buyerName: nameSchema,
+  // Full name (first + last, letters only) — Grow rejects anything else (427).
+  buyerName: fullNameSchema,
   buyerEmail: emailSchema,
   // Required + valid Israeli number: the Grow payment provider rejects missing/
   // invalid phones (surfaces as a cryptic "Scenario failed to complete").
-  buyerPhone: z
-    .string()
-    .trim()
-    .min(1, 'נא להזין מספר טלפון')
-    .refine((v) => normalizeIsraeliPhone(v) !== null, 'מספר טלפון ישראלי לא תקין'),
+  buyerPhone: requiredIsraeliPhone,
   buyerCompany: z.string().trim().max(160).optional().default(''),
   buyerTaxId: z.string().trim().max(40).optional().default(''),
   wantsInvoice: z.boolean().default(false),
   showBuyerName: z.boolean().default(true),
   sendAnonymously: z.boolean().default(false),
 
-  recipientName: nameSchema,
+  recipientName: fullNameSchema,
   recipientEmail: emailSchema,
-  recipientPhone: phoneSchema.optional().default(''),
+  // Recipient phone is now REQUIRED (business decision — see purchase-wizard).
+  recipientPhone: requiredIsraeliPhone,
   recipientLanguage: z.enum(['he', 'en']).default('he'),
   deliveryChannel: z.enum(['email']).default('email'), // MVP: email only
 
