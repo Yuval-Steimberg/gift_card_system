@@ -139,19 +139,21 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
    (`{...}/api/webhooks/payment`, `{...}/checkout/confirmation?ref={order_ref}`), else a paid card
    never activates. (b) Grow rejects an **empty Full Name/phone** with `427 pageFieldSettings[fullName][value]`
    / "Missing parameter 'phone'"; buyer name+phone are now required + guarded in `grow.ts` before
-   the Make call. (c) Grow's **server-to-server callback NEVER ARRIVES** — the browser redirect
-   works but the POST doesn't, and the card audit log shows **zero** `payment.webhook_*` hits
-   **even after** repointing the Make notify URL at the raw Vercel domain
-   (`gift-card-system-8i8e.vercel.app/api/webhooks/payment`). So it's **not a domain problem** —
-   Grow simply isn't sending server notifications for this Meshulam terminal (IPN/"עדכון שרת" likely
-   disabled). The JAS site masks this by showing success optimistically on redirect; our app is
-   stricter (activates only on a verified webhook), so the gap surfaces. **THE FIX = ask Grow/Meshulam
-   support to enable server-to-server notifications for the terminal** (or, if API keys are ever
-   obtained, build confirmation-page polling via `getPaymentStatus`). Meanwhile use `adminMarkPaid`.
-   Our activation path is proven working (the manual button runs the same verified path →
-   `giftcard.activated`); the ONLY missing link is Grow *sending* the callback.
-   `processVerifiedPaymentEvent` audits every outcome (`payment.webhook_<code>`) so any callback that
-   DOES arrive-but-doesn't-activate (e.g. `amount_mismatch`) is visible in the card log.
+   the Make call. (c) **Grow's callback is a GLOBAL webhook, not the per-request notify_url** — set in Grow →
+   הגדרות → ניהול ווהבוקים (webhooks), type "עדכון לאחר ביצוע עסקה", scope "כל העסקאות". A single
+   global webhook fires for ALL transactions and OVERRIDES the per-transaction notify_url we send in
+   Make — which is why the Make notify_url never mattered. The pre-existing "Just A Second Website"
+   webhook pointed at a **dead JAS Netlify URL** (`fabulous-chaja-618dfe.netlify.app`), so gift-card
+   payments were being POSTed there into the void. **THE FIX = add a Grow webhook "Just A Second Gift
+   Cards" → `https://gift-card-system-8i8e.vercel.app/api/webhooks/payment`, active, all transactions,
+   and disable the old dead JAS one** (Grow may fire only one). Diagnosed by pointing the webhook at
+   webhook.site and capturing the real payload.
+   (d) **Grow's Payment-Links webhook payload:** amount is `paymentSum` (NOT `sum`), payer is
+   `payerEmail`, id is `transactionCode`/`asmachta`, and it **omits our order_ref/custom field**. So
+   `verifyWebhook` reads `paymentSum`/`payerEmail`, and `processVerifiedPaymentEvent` resolves the
+   card by order_ref → else by the newest pending card matching **payer email + exact amount**
+   (`findPendingCardIdByEmailAndAmount`). Idempotency stays on the provider event id; unmatched
+   callbacks log `payment.webhook_unmatched`. `adminMarkPaid` remains the manual backup.
 9. **Wix DNS limits dictate the email provider.** Wix **cannot** create subdomain MX records and
    **locks nameservers** on Wix-registered domains (can't move DNS to Cloudflare). Resend REQUIRES a
    `send` subdomain MX → impossible on Wix. **SendGrid** authenticates via **CNAME** (Sender
@@ -200,10 +202,11 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
 
 ## Status of the live-launch items
 
-- **Grow payments** — ✅ real ₪1 charge + receipt confirmed via Make. ⚠️ auto-activation callback
-  **never arrives** (gotcha #8c) — NOT a domain issue; Grow isn't sending server notifications for
-  the terminal. **Action: Grow/Meshulam support must enable server-to-server notifications.** Use
-  `adminMarkPaid` ("סימון כשולם והפעלה") meanwhile. App side is proven working.
+- **Grow payments** — ✅ real ₪1 charge + receipt confirmed. Auto-activation: Grow WAS firing all
+  along, but via a **global webhook** aimed at a dead JAS Netlify URL (gotcha #8c). Fixed by adding a
+  dedicated Grow webhook → the gift app + parsing Grow's real payload (`paymentSum`/`payerEmail`, no
+  order_ref → match by email+amount, gotcha #8d). Pending: confirm one live ₪1 payment shows
+  `giftcard.activated · verified payment` (not `manual_activate`). `adminMarkPaid` is the backup.
 - **Email (SendGrid)** — ✅✅ **DONE + confirmed live** (real card email received in the inbox).
   Free plan = 100/day.
 - **₪1 test mode** — ✅ works. Set via `/admin → הגדרות` (min amount = 1) or SQL
