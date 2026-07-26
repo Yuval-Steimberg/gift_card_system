@@ -127,6 +127,20 @@ export class MemoryStore implements GiftCardStore {
     return c ? { ...c } : null
   }
 
+  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
+    const wanted = email.trim().toLowerCase()
+    const pending: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing']
+    const match = [...this.cards.values()]
+      .filter(
+        (c) =>
+          (c.buyerEmail ?? '').trim().toLowerCase() === wanted &&
+          c.initialAmountMinor === amountMinor &&
+          pending.includes(c.status),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
+    return match ? match.id : null
+  }
+
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
     for (const c of this.cards.values()) if (c.publicToken === token) return { ...c }
     return null

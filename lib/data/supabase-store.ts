@@ -115,6 +115,18 @@ export class SupabaseStore implements GiftCardStore {
     const { data } = await this.db.from('gift_cards').select('*').eq('id', id).maybeSingle()
     return data ? this.toCard(data) : null
   }
+
+  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
+    const { data } = await this.db
+      .from('gift_cards')
+      .select('id')
+      .ilike('buyer_email', email.trim())
+      .eq('initial_amount_minor', amountMinor)
+      .in('status', ['draft', 'awaiting_payment', 'payment_processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+    return data && data[0] ? String(data[0].id) : null
+  }
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
     const { data } = await this.db.from('gift_cards').select('*').eq('public_token', token).maybeSingle()
     return data ? this.toCard(data) : null

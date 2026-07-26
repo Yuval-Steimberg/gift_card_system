@@ -200,12 +200,15 @@ export class GrowPaymentProvider implements PaymentProvider {
       throw new WebhookVerificationError('invalid_webhook_token')
     }
 
-    // Field extraction mirrors the reference grow-webhook exactly.
+    // Field names verified against a live Grow "Payment Links" server webhook:
+    //   transactionCode, asmachta, paymentSum, payerEmail, order_ref/cField1 (may
+    //   be absent). Keep the older aliases too for direct-API/Make callbacks.
     const transactionCode = String(data.transactionCode ?? data.asmachta ?? '')
-    const orderRef = String(data.cField1 ?? data.order_ref ?? '')
-    const majorSum = Number(data.sum ?? data.amount ?? 0)
+    const orderRef = String(data.cField1 ?? data.order_ref ?? data.orderRef ?? '')
+    const majorSum = Number(data.paymentSum ?? data.sum ?? data.amount ?? 0)
     const statusCode = String(data.statusCode ?? data.status ?? '')
     const approved = statusCode === '1' || statusCode === 'success' || Boolean(transactionCode)
+    const customerEmail = String(data.payerEmail ?? data.customer_email ?? data.email ?? '').trim()
 
     return {
       provider: this.name,
@@ -215,6 +218,7 @@ export class GrowPaymentProvider implements PaymentProvider {
       status: approved ? 'paid' : 'failed',
       amountMinor: Math.round(majorSum * 100),
       currency: 'ILS',
+      customerEmail: customerEmail || undefined,
       raw: data,
     }
   }

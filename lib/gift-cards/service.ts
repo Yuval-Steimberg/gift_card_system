@@ -154,9 +154,33 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
     return
   }
 
+  // Resolve which card this payment is for. Prefer the order reference; if the
+  // provider callback omits it (Grow "Payment Links" webhook doesn't echo our
+  // custom field), fall back to the newest pending card matching the payer's
+  // email + exact amount.
+  let cardId = event.orderRef
+  if (!cardId || !(await store.getGiftCardById(cardId))) {
+    if (event.customerEmail) {
+      const matched = await store.findPendingCardIdByEmailAndAmount(event.customerEmail, event.amountMinor)
+      if (matched) cardId = matched
+    }
+  }
+  if (!cardId) {
+    await store.appendAudit({
+      actorId: null,
+      actorRole: 'system',
+      action: 'payment.webhook_unmatched',
+      entityType: 'gift_card',
+      entityId: event.orderRef || event.eventId,
+      reason: `no card matched (email=${event.customerEmail ?? '—'} amount=${event.amountMinor})`,
+      metadata: { eventId: event.eventId },
+    })
+    return
+  }
+
   const result = await store.activateFromPayment({
     eventId: event.eventId,
-    orderRef: event.orderRef,
+    orderRef: cardId,
     providerPaymentId: event.providerPaymentId,
     provider: event.provider,
     amountMinor: event.amountMinor,
@@ -174,7 +198,7 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
       actorRole: 'system',
       action: `payment.webhook_${result.code}`,
       entityType: 'gift_card',
-      entityId: event.orderRef,
+      entityId: cardId,
       reason: `provider=${event.provider} amount=${event.amountMinor} event=${event.eventId}`,
       metadata: { code: result.code, providerPaymentId: event.providerPaymentId },
     })

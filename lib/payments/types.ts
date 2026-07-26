@@ -35,6 +35,9 @@ export interface VerifiedPaymentEvent {
   status: 'paid' | 'failed' | 'refunded' | 'pending'
   amountMinor: Minor
   currency: Currency
+  /** Payer email, when the provider supplies it — used to match the card when
+   *  the provider callback omits the order reference (e.g. Grow Payment Links). */
+  customerEmail?: string
   /** The raw verified payload, stored for audit/reconciliation. */
   raw: Record<string, unknown>
 }

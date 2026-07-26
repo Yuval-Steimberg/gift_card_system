@@ -156,6 +156,10 @@ export interface GiftCardStore {
   // gift cards
   createGiftCard(input: CreateGiftCardInput): Promise<GiftCard>
   getGiftCardById(id: string): Promise<GiftCard | null>
+  /** Newest pre-activation card matching a buyer email + exact amount — used to
+   *  reconcile a provider callback that omits the order reference (Grow Payment
+   *  Links). Returns the card id, or null when there's no unambiguous match. */
+  findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null>
   getGiftCardByToken(token: string): Promise<GiftCard | null>
   getGiftCardByCode(code: string): Promise<GiftCard | null>
   listGiftCards(filter: GiftCardFilter): Promise<{ items: GiftCard[]; total: number }>

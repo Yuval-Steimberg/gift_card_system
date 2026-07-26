@@ -110,6 +110,25 @@ describe('GrowPaymentProvider — webhook parsing (matches reference grow-webhoo
     expect(event.providerPaymentId).toBe('A123')
   })
 
+  it('parses the live Grow "Payment Links" webhook (paymentSum, payerEmail, no order_ref)', async () => {
+    // Exact field shape captured from a real Grow server webhook.
+    const body = JSON.stringify({
+      transactionCode: 'fB7vk2eftq7CuDXgtBmDAQ==',
+      asmachta: '503074682',
+      paymentSum: '1',
+      payerEmail: 'yuvalste13@gmail.com',
+      paymentDesc: 'Just A Second שובר מתנה 1',
+      paymentSource: 'Payment Links',
+    })
+    const req = new Request('http://x', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+    const event = await provider.verifyWebhook(req)
+    expect(event.status).toBe('paid')
+    expect(event.amountMinor).toBe(100) // ₪1 from paymentSum
+    expect(event.orderRef).toBe('') // Grow omits it — matched later by email+amount
+    expect(event.customerEmail).toBe('yuvalste13@gmail.com')
+    expect(event.providerPaymentId).toBe('fB7vk2eftq7CuDXgtBmDAQ==')
+  })
+
   it('rejects a callback that carries a mismatched secret', async () => {
     const body = JSON.stringify({ transactionCode: 'TX', cField1: 'c', sum: '100', secret: 'WRONG' })
     const req = new Request('http://x', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
