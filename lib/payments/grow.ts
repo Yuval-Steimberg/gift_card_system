@@ -253,11 +253,16 @@ export class GrowPaymentProvider implements PaymentProvider {
 }
 
 function parseBody(rawBody: string, contentType: string): Record<string, string> {
-  if (contentType.includes('application/json')) {
+  // Accept JSON whenever the body looks like JSON, regardless of the declared
+  // content-type — Grow's "JSON" webhook doesn't always set application/json,
+  // and a mislabeled body must still parse (else orderRef is empty -> not_found).
+  const trimmed = rawBody.trim()
+  if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
-      return JSON.parse(rawBody)
+      const parsed = JSON.parse(trimmed)
+      return Array.isArray(parsed) ? (parsed[0] ?? {}) : parsed
     } catch {
-      return {}
+      /* fall through to form parsing */
     }
   }
   const params = new URLSearchParams(rawBody)
