@@ -163,6 +163,19 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     via `new URL()` with a localhost fallback — a mistyped provider var or base URL must never throw
     (it once white-screened `/admin` because auth calls `serverEnv` on a hot path — see gotcha #3).
 
+## Gift-card PDF — Hebrew rendering (fixed; don't regress)
+
+`lib/gift-cards/pdf.ts` embeds **Heebo** (`public/fonts/Heebo-Regular.ttf`, Hebrew + Latin +
+digits; Noto Sans Hebrew is a Hebrew-only fallback) via fontkit, `subset:false` (the variable
+font can fail to subset). **Draw Hebrew in LOGICAL order — do NOT reverse it.** pdf-lib + fontkit
+already lay an embedded Hebrew font out RTL correctly; a naive per-line reversal double-flips it
+into gibberish (this was the bug — verified by rendering the PDF to PNG with pymupdf). Keep every
+line **single-script**: mixed Latin+Hebrew in one `drawText` reverses the Hebrew part, so labels
+(`To:`/`From:`/`Message:`/`Code`+`קוד`, `GIFT CARD`+`שובר מתנה`) are drawn separately from Hebrew
+values. Greeting wraps on word boundaries. The recipient web page (`/gift/[token]`) also shows the
+full message in a dedicated "הודעה אישית" section (the card-art preview clamps to ~2 lines).
+To eyeball changes: generate a card and `python3 -c "import fitz; ...get_pixmap().save('x.png')"`.
+
 ## Performance (admin felt slow — fixed; keep these)
 
 - **`loading.tsx` per area** (`app/admin`, `app/gift-cards`, `app/employee`, `app/gift/[token]`)
@@ -215,8 +228,10 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   and set `GREENINVOICE_DOC_TYPE` per the accountant, then flip to `greeninvoice`.
 - **Settings save** — fixed: it silently swallowed DB write errors + didn't revalidate the public
   funnel; now surfaces errors and revalidates `/gift-cards` + `/`.
+- **Hebrew gift-card PDF** — ✅ fixed (Heebo embedded, logical-order rendering; greeting/recipient/
+  sender now show on the PDF + the recipient web page). See the PDF section above.
 - **Remaining non-code work:** update `businessEmail`→`justasecondil2@gmail.com` + real store phone in
-  settings; legal/privacy review; Hebrew PDF font drop-in at `public/fonts/NotoSansHebrew-Regular.ttf`;
-  revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on the Wix site; rotate
-  any secrets shared in chat; Sentry DSN; Supabase backups. Optional code: an in-`/admin`
-  staff-management page (invite by email + role) to avoid SQL.
+  settings; set gift-card **expiry to 4 months** in `/admin → הגדרות` (the new landing copy says 4);
+  legal/privacy review; revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on
+  the Wix site; rotate any secrets shared in chat; Sentry DSN; Supabase backups. Optional code: an
+  in-`/admin` staff-management page (invite by email + role) to avoid SQL.
