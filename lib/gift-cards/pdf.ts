@@ -58,7 +58,9 @@ export async function generateGiftCardPdf(
 
   const pick = (text: string): { font: PDFFont; text: string } => {
     if (hebrewFont && HEBREW_RANGE.test(text)) {
-      return { font: hebrewFont, text: naiveRtl(text) }
+      // Draw in LOGICAL order — pdf-lib + fontkit lay Hebrew out RTL correctly
+      // with an embedded font. (Reversing it here double-flips → gibberish.)
+      return { font: hebrewFont, text }
     }
     // Latin/standard-font path: strip anything WinAnsi can't encode (₪, Hebrew…).
     return { font: helv, text: toWinAnsiSafe(text) }
@@ -114,8 +116,9 @@ export async function generateGiftCardPdf(
       })
   }
 
-  // Code (LTR-safe, monospace-ish)
-  drawText('Code / קוד:', 48, 92, 10, false, rgb(0.72, 0.78, 0.72))
+  // Code — split label so the Hebrew word isn't reversed by mixing scripts.
+  drawText('Code', 48, 92, 10, false, label)
+  drawText('קוד', 82, 92, 10, false, label)
   drawText(card.code, 48, 70, 16, true, brand.orange)
 
   // Expiry + URL
@@ -138,25 +141,28 @@ export async function generateGiftCardPdf(
   return doc.save()
 }
 
+/** Word-boundary wrap (keeps whole words together; only hard-splits a word that
+ *  is itself longer than the line). Preserves explicit newlines. */
 function wrap(text: string, maxChars: number): string[] {
   const out: string[] = []
-  for (const rawLine of text.split('\n')) {
-    let line = rawLine
-    while (line.length > maxChars) {
-      out.push(line.slice(0, maxChars))
-      line = line.slice(maxChars)
+  for (const para of text.split('\n')) {
+    let line = ''
+    for (const word of para.split(/\s+/)) {
+      const candidate = line ? `${line} ${word}` : word
+      if (candidate.length <= maxChars) {
+        line = candidate
+        continue
+      }
+      if (line) out.push(line)
+      line = word
+      while (line.length > maxChars) {
+        out.push(line.slice(0, maxChars))
+        line = line.slice(maxChars)
+      }
     }
     out.push(line)
   }
   return out
-}
-
-/** Naive per-line RTL reversal for embedded Hebrew (no full bidi shaping). */
-function naiveRtl(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => [...line].reverse().join(''))
-    .join('\n')
 }
 
 /**
