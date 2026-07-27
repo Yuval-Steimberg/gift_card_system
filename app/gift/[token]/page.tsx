@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Download } from '@/components/icons'
 import { STATUS_LABEL_HE } from '@/lib/gift-cards/status'
 import { ReportLost } from '@/components/gift-card/report-lost'
+import { isRtlText } from '@/lib/security/text'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { robots: { index: false } }
@@ -37,6 +38,21 @@ export default async function GiftPage({ params }: { params: { token: string } }
           greeting={view.greeting}
           code={view.code}
         />
+
+        {view.greeting?.trim() && !isVoid ? (
+          <div className="rounded-lg border border-border bg-card p-5 shadow-jas-1">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">הודעה אישית</h2>
+            <p
+              className="mt-2 whitespace-pre-line text-base leading-relaxed text-foreground"
+              dir={isRtlText(view.greeting) ? 'rtl' : 'ltr'}
+            >
+              {view.greeting}
+            </p>
+            {view.senderName ? (
+              <p className="mt-3 text-sm text-muted-foreground">— {view.senderName}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="rounded-lg border border-border bg-card p-5 shadow-jas-2">
           <div className="flex items-center justify-between">

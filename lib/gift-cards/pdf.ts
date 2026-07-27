@@ -106,8 +106,8 @@ export async function generateGiftCardPdf(
   if (card.greeting?.trim()) {
     drawText('Message:', 48, cy, 10, false, label)
     cy -= 16
-    wrap(card.greeting, 52)
-      .slice(0, 3)
+    wrap(card.greeting, 54)
+      .slice(0, 4)
       .forEach((line) => {
         drawText(line, 48, cy, 11, false, rgb(0.85, 0.89, 0.85))
         cy -= 15
