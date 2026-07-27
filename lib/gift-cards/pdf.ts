@@ -5,7 +5,12 @@ import { formatMoney } from '@/lib/money'
 import { qrPngBuffer, recipientUrl } from './qr'
 import type { GiftCard, GiftCardTemplate } from './types'
 
-const HEBREW_FONT_PATH = path.join(process.cwd(), 'public', 'fonts', 'NotoSansHebrew-Regular.ttf')
+// Prefer Heebo (Hebrew + Latin + digits — the brand font, so mixed text has no
+// missing glyphs); fall back to Noto Sans Hebrew (Hebrew-only) if Heebo absent.
+const HEBREW_FONT_PATHS = [
+  path.join(process.cwd(), 'public', 'fonts', 'Heebo-Regular.ttf'),
+  path.join(process.cwd(), 'public', 'fonts', 'NotoSansHebrew-Regular.ttf'),
+]
 const HEBREW_RANGE = /[֐-׿؀-ۿ]/
 
 const brand = {
@@ -32,11 +37,13 @@ export async function generateGiftCardPdf(
   const helvBold = await doc.embedFont(StandardFonts.HelveticaBold)
 
   let hebrewFont: PDFFont | null = null
-  if (existsSync(HEBREW_FONT_PATH)) {
+  const hebrewFontPath = HEBREW_FONT_PATHS.find((p) => existsSync(p))
+  if (hebrewFontPath) {
     try {
       const fontkit = (await import('@pdf-lib/fontkit')).default
       doc.registerFontkit(fontkit)
-      hebrewFont = await doc.embedFont(readFileSync(HEBREW_FONT_PATH), { subset: true })
+      // subset:false — variable fonts (Heebo) can fail to subset; full embed is safe.
+      hebrewFont = await doc.embedFont(readFileSync(hebrewFontPath), { subset: false })
     } catch {
       hebrewFont = null
     }
@@ -63,9 +70,18 @@ export async function generateGiftCardPdf(
     page.drawText(p.text, { x, y, size, font, color })
   }
 
+  const label = rgb(0.72, 0.78, 0.72)
+  // Draw a Latin label + a value on ONE line, as two separate draws so a Hebrew
+  // value keeps its own font/RTL handling and the Latin label isn't reversed.
+  const drawLabeled = (labelText: string, value: string, x: number, y: number) => {
+    drawText(labelText, x, y, 10, false, label)
+    if (value?.trim()) drawText(value, x + helv.widthOfTextAtSize(labelText, 10) + 8, y, 12, false, brand.cream)
+  }
+
   // Header
   drawText('JUST A SECOND', 48, height - 72, 20, true, brand.orange)
-  drawText('GIFT CARD  ·  שובר מתנה', 48, height - 96, 11, false, brand.cream)
+  drawText('GIFT CARD', 48, height - 96, 11, false, brand.cream)
+  drawText('שובר מתנה', 122, height - 96, 11, false, brand.cream)
 
   // Amount (LTR-safe)
   drawText(formatMoney(card.balanceMinor, card.currency), 48, height - 160, 40, true, brand.cream)
@@ -78,10 +94,25 @@ export async function generateGiftCardPdf(
     rgb(0.72, 0.78, 0.72),
   )
 
-  // Recipient + greeting
-  drawText(`To / אל: ${card.isAnonymous ? '' : card.recipientName}`, 48, height - 220, 12, false, brand.cream)
-  const greetingLines = wrap(card.greeting, 60).slice(0, 4)
-  greetingLines.forEach((line, i) => drawText(line, 48, height - 244 - i * 16, 11, false, rgb(0.85, 0.89, 0.85)))
+  // Recipient, sender, and the personal greeting (each on its own line so
+  // Hebrew values render correctly — this is what was getting stripped before).
+  let cy = height - 214
+  drawLabeled('To:', card.recipientName, 48, cy)
+  cy -= 22
+  if (!card.isAnonymous && card.buyerName?.trim()) {
+    drawLabeled('From:', card.buyerName, 48, cy)
+    cy -= 22
+  }
+  if (card.greeting?.trim()) {
+    drawText('Message:', 48, cy, 10, false, label)
+    cy -= 16
+    wrap(card.greeting, 52)
+      .slice(0, 3)
+      .forEach((line) => {
+        drawText(line, 48, cy, 11, false, rgb(0.85, 0.89, 0.85))
+        cy -= 15
+      })
+  }
 
   // Code (LTR-safe, monospace-ish)
   drawText('Code / קוד:', 48, 92, 10, false, rgb(0.72, 0.78, 0.72))
