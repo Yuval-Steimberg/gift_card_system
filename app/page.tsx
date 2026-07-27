@@ -19,16 +19,21 @@ export default async function HomePage() {
         {/* Hero */}
         <section className="container grid gap-10 py-16 md:grid-cols-2 md:items-center md:py-24">
           <div className="space-y-6">
-            <p className="eyebrow">Just A Second · שוברי מתנה</p>
+            <p className="eyebrow">שוברי מתנה</p>
             <h1 className="text-4xl leading-tight md:text-5xl">
-              מתנה שנשלחת ברגע,
-              <br />
-              ונשמרת לזמן ארוך.
+              <span className="font-display block text-3xl md:text-4xl">Just a Second</span>
+              <span className="mt-2 block font-extrabold">מתנה עם סיפור, מתנה עם משמעות.</span>
             </h1>
-            <p className="max-w-md text-lg text-muted-foreground">
-              שובר מתנה דיגיטלי לחנות שלנו — בוחרים סכום ועיצוב, כותבים ברכה אישית, ואנחנו שולחים
-              אותו ישירות לנמען. נפדה אצלנו בחנות, בקלות.
-            </p>
+            <div className="max-w-md space-y-4 text-lg text-muted-foreground">
+              <p>הזדמנות לרכוש שובר מתנה ייחודי.</p>
+              <div className="text-base">
+                <p className="font-semibold text-foreground">שימו לב:</p>
+                <ul className="mt-1 list-disc space-y-1 ps-5">
+                  <li>השובר ניתן למימוש רק בחנות הפיזית שלנו. לא ניתן למימוש בחנות המקוונת.</li>
+                  <li>תוקף השובר לארבעה חודשים.</li>
+                </ul>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button asChild size="lg">
                 <Link href="/gift-cards">רכישת שובר מתנה</Link>
@@ -37,9 +42,7 @@ export default async function HomePage() {
                 <Link href="/#how">איך זה עובד</Link>
               </Button>
             </div>
-            <p className="text-sm text-muted-foreground">
-              תקף ל-{settings.expiryMonths} חודשים · נפדה במנחם בגין 34, תל אביב
-            </p>
+            <p className="text-sm text-muted-foreground">נפדה במנחם בגין 34, תל אביב</p>
           </div>
           <div className="mx-auto w-full max-w-md">
             <GiftCardPreview
