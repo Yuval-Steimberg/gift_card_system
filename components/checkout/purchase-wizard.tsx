@@ -20,7 +20,15 @@ interface Props {
   settings: SystemSettings
 }
 
-const STEPS = ['סכום', 'עיצוב', 'הרוכש', 'הנמען', 'ברכה', 'מועד', 'סיכום'] as const
+// Scheduled (מתוזמן) delivery is hidden for now — only immediate delivery is
+// offered. Flip SCHEDULING_ENABLED back to true to restore the "מועד" step (all
+// the scheduling code/UI is kept intact below).
+const SCHEDULING_ENABLED = false
+const ALL_STEPS = ['סכום', 'עיצוב', 'הרוכש', 'הנמען', 'ברכה', 'מועד', 'סיכום'] as const
+// Actual step indices that are shown. When scheduling is off the timing step (5)
+// is skipped entirely; every other step keeps its original index so the render
+// blocks and FIELD_STEP map below stay valid.
+const VISIBLE_STEPS = SCHEDULING_ENABLED ? [0, 1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 6]
 
 /** Which wizard step each server-validated field lives on (to jump there on error). */
 const FIELD_STEP: Record<string, number> = {
@@ -106,6 +114,14 @@ export function PurchaseWizard({ templates, settings }: Props) {
 
   const canNext = stepValid(step)
 
+  // Navigation walks VISIBLE_STEPS so a hidden step (e.g. timing when scheduling
+  // is off) is transparently skipped in both directions.
+  const firstStep = VISIBLE_STEPS[0]!
+  const lastStep = VISIBLE_STEPS[VISIBLE_STEPS.length - 1]!
+  const goNext = () =>
+    setStep((s) => VISIBLE_STEPS[Math.min(VISIBLE_STEPS.indexOf(s) + 1, VISIBLE_STEPS.length - 1)]!)
+  const goPrev = () => setStep((s) => VISIBLE_STEPS[Math.max(VISIBLE_STEPS.indexOf(s) - 1, 0)]!)
+
   function applyCustom(v: string) {
     setCustomAmount(v)
     const m = parseMajorToMinor(v)
@@ -167,22 +183,22 @@ export function PurchaseWizard({ templates, settings }: Props) {
       <div>
         {/* progress */}
         <ol className="mb-8 flex flex-wrap gap-2" aria-label="שלבי רכישה">
-          {STEPS.map((label, i) => (
-            <li key={label}>
+          {VISIBLE_STEPS.map((sIdx, pos) => (
+            <li key={ALL_STEPS[sIdx]}>
               <button
                 type="button"
-                onClick={() => i <= step && setStep(i)}
-                disabled={i > step}
+                onClick={() => sIdx <= step && setStep(sIdx)}
+                disabled={sIdx > step}
                 className={cn(
                   'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
-                  i === step && 'bg-primary text-primary-foreground',
-                  i < step && 'bg-secondary text-secondary-foreground',
-                  i > step && 'bg-muted text-muted-foreground',
+                  sIdx === step && 'bg-primary text-primary-foreground',
+                  sIdx < step && 'bg-secondary text-secondary-foreground',
+                  sIdx > step && 'bg-muted text-muted-foreground',
                 )}
-                aria-current={i === step ? 'step' : undefined}
+                aria-current={sIdx === step ? 'step' : undefined}
               >
-                {i < step ? <Check className="h-3 w-3" /> : <span>{i + 1}</span>}
-                {label}
+                {sIdx < step ? <Check className="h-3 w-3" /> : <span>{pos + 1}</span>}
+                {ALL_STEPS[sIdx]}
               </button>
             </li>
           ))}
@@ -420,12 +436,12 @@ export function PurchaseWizard({ templates, settings }: Props) {
 
         {/* nav */}
         <div className="mt-6 flex items-center justify-between">
-          <Button variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0 || submitting}>
+          <Button variant="ghost" onClick={goPrev} disabled={step === firstStep || submitting}>
             <ChevronRight className="h-4 w-4" />
             הקודם
           </Button>
-          {step < STEPS.length - 1 ? (
-            <Button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+          {step !== lastStep ? (
+            <Button onClick={() => canNext && goNext()} disabled={!canNext}>
               המשך
               <ChevronLeft className="h-4 w-4" />
             </Button>

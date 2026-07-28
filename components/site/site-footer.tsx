@@ -18,6 +18,9 @@ export function SiteFooter() {
           <Link href="/terms" className="hover:underline">
             תנאי שימוש
           </Link>
+          <Link href="/privacy" className="hover:underline">
+            מדיניות פרטיות
+          </Link>
           <Link href="/employee" className="hover:underline">
             כניסת עובדים
           </Link>
