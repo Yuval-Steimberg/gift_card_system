@@ -254,10 +254,15 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
 
   // Enqueue recipient delivery (immediate or scheduled).
   await store.createDeliveryJob(card.id, 'email', card.scheduledDeliveryAt)
-  if (!card.scheduledDeliveryAt) {
-    // Process immediately for a snappy dev experience; safe + idempotent.
-    await deliverDueJobs(new Date().toISOString(), 5)
-  }
+  // Always sweep DUE jobs now. deliverDueJobs only claims jobs whose time has
+  // arrived, so a genuinely future-scheduled card is left untouched — but:
+  //   • an immediate card delivers instantly (snappy), and
+  //   • a scheduled card whose time is already in the past at activation (e.g.
+  //     the buyer picked "in 5 min" but paid 10 min later) goes out NOW instead
+  //     of waiting up to a full day for the daily cron, and
+  //   • any OTHER card that became due is flushed opportunistically on each
+  //     purchase (a safety net against the once-a-day Vercel Hobby cron).
+  await deliverDueJobs(new Date().toISOString(), 25)
 }
 
 async function sendBuyerConfirmation(card: GiftCard, receiptNumber: string | null): Promise<void> {

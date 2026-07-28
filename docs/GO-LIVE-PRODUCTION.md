@@ -191,10 +191,28 @@ The app is explicitly **not represented as legally certified**.
 
 ## 9. 🔧 Scheduled delivery (cron)
 
-Immediate delivery works with no cron. For **scheduled** gift cards to send close to their chosen
-time, upgrade to **Vercel Pro** and set `vercel.json` cron back to `*/5 * * * *`. On Hobby it's
-daily (`0 9 * * *`). Any external scheduler can also `POST /api/cron/deliver` with
-`Authorization: Bearer $CRON_SECRET`.
+Immediate delivery works with no cron — it's sent inline the moment payment is verified. **Scheduled**
+(מתוזמן) gift cards enqueue a due-job that only sends when `/api/cron/deliver` runs after the chosen
+time. Vercel **Hobby** fires that cron only **once a day** (`0 9 * * *` = 09:00 UTC), so without a
+more frequent trigger a card scheduled for "today 15:00" won't arrive until the next 09:00-UTC tick.
+Pick **one** of these so scheduled cards arrive on time:
+
+- **(recommended, free) GitHub Actions** — the repo ships `.github/workflows/scheduled-delivery.yml`,
+  which POSTs the endpoint every 15 min. Enable it by adding two repo secrets
+  (Settings → Secrets and variables → Actions):
+  - `DELIVERY_CRON_URL` = `https://gift.justasecond.co.il/api/cron/deliver`
+  - `CRON_SECRET` = the **same** value set in the Vercel project env.
+  Until `DELIVERY_CRON_URL` is set the workflow self-skips. Trigger a test run from the Actions tab
+  ("Run workflow"). GitHub cron granularity is ~5–15 min and can be delayed at peak — fine for gift
+  cards, not for to-the-second timing.
+- **Vercel Pro** — set `vercel.json` cron back to `*/5 * * * *`.
+- **Any external scheduler** (cron-job.org, Supabase `pg_cron` + `pg_net`, an uptime pinger) —
+  `POST https://…/api/cron/deliver` with header `Authorization: Bearer $CRON_SECRET`.
+
+Notes: the endpoint is **idempotent** (per-card idempotency keys → never double-sends), so pinging it
+often is safe. If `CRON_SECRET` is left unset the endpoint accepts the daily Vercel cron unauthenticated
+(it only flushes already-due delivery emails) — but set a secret in production and use it in whichever
+trigger you pick.
 
 ---
 

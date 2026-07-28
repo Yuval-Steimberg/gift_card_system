@@ -94,8 +94,12 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
   Staff = a Supabase Auth user linked to a `profiles` row + a `user_roles` row (see "Adding staff").
 - **₪1 test mode:** `/admin → הגדרות` set **min amount = 1** (custom amounts already on) to buy a
   ₪1 card through the real Grow flow. Revert min to 50 before public launch.
-- **Cron:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit). Immediate delivery
-  doesn't need cron.
+- **Cron / scheduled delivery:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit).
+  **Immediate** delivery never needs cron — it's sent inline at activation. **Scheduled** (שובר
+  מתוזמן) delivery is a due-job queue flushed by that endpoint. Because Hobby cron is daily-only,
+  timely scheduled delivery needs a **frequent external trigger**: the in-repo GitHub Actions
+  workflow `.github/workflows/scheduled-delivery.yml` pings the endpoint every 15 min (set repo
+  secrets `DELIVERY_CRON_URL` + `CRON_SECRET`; self-skips until set). See gotcha #11.
 
 ### Adding staff (production / Supabase Auth)
 1. Supabase → Authentication → Users → **Add user** (email + password, ✅ Auto Confirm).
@@ -133,7 +137,8 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
    `AUTH_DEMO_PASSWORD_SET` + `AUTH_DEMO_PASSWORD_LEN` to diagnose.
 6. **Static prerender vs runtime env/DB.** Pages that read settings/DB are `export const dynamic =
    'force-dynamic'` so the build never depends on runtime env or a live DB.
-7. **Vercel Hobby crons are daily only** (`0 9 * * *`); `*/5` needs Pro.
+7. **Vercel Hobby crons are daily only** (`0 9 * * *`); `*/5` needs Pro. This directly limits
+   **scheduled** (מתוזמן) delivery — see gotcha #11.
 8. **Grow via Make: three traps.** (a) The JAS Make scenario **hardcodes** notify/success/invoice
    URLs to `just-a-second-website.vercel.app` — for gift cards those MUST be the gift app's URLs
    (`{...}/api/webhooks/payment`, `{...}/checkout/confirmation?ref={order_ref}`), else a paid card
@@ -162,6 +167,19 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 10. **`serverEnv()` enums use `.catch(default)`** (not just `.default`) + `APP_BASE_URL` is validated
     via `new URL()` with a localhost fallback — a mistyped provider var or base URL must never throw
     (it once white-screened `/admin` because auth calls `serverEnv` on a hot path — see gotcha #3).
+11. **Scheduled (מתוזמן) delivery needs a frequent external cron — the daily Vercel Hobby cron is not
+    enough.** Immediate cards deliver inline at activation; scheduled cards enqueue a `scheduled`
+    delivery job that only goes out when `/api/cron/deliver` runs after the chosen time. Vercel Hobby
+    fires that once/day at 09:00 UTC, so a card scheduled for "today 15:00" would otherwise wait until
+    the next 09:00-UTC tick — which is exactly the "scheduled cards don't work" complaint. Three fixes:
+    (a) activation now ALWAYS sweeps due jobs (`deliverDueJobs`), so a schedule already in the past at
+    payment time — or any other due card — flushes immediately, and every new purchase opportunistically
+    flushes due scheduled cards; (b) `/api/cron/deliver` no longer 401s when `CRON_SECRET` is
+    unset/empty (it used to strand every scheduled card) — it enforces the Bearer secret only when one
+    is configured, and also accepts Vercel's `x-vercel-cron` header; (c) for genuinely timely delivery,
+    enable the in-repo GH Actions workflow `.github/workflows/scheduled-delivery.yml` (every 15 min;
+    needs repo secrets `DELIVERY_CRON_URL` + `CRON_SECRET`). The endpoint is idempotent (per-card
+    idempotency keys) so pinging it often never double-sends. Tests: `tests/integration/scheduled-delivery.test.ts`.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

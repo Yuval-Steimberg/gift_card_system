@@ -1,0 +1,47 @@
+# Timely scheduled gift-card delivery.
+#
+# WHY THIS EXISTS: Vercel Hobby crons run at most ONCE PER DAY, so the built-in
+# `vercel.json` cron (09:00 UTC) can only flush scheduled cards once a day at a
+# fixed hour — a card scheduled for "today 3pm" would otherwise wait until the
+# next 09:00-UTC tick. This workflow pings the same delivery endpoint every 15
+# minutes so scheduled cards go out close to their chosen time, for free, with
+# no Vercel Pro plan.
+#
+# SETUP (one-time): add two repository secrets (Settings → Secrets → Actions):
+#   DELIVERY_CRON_URL   e.g. https://gift.justasecond.co.il/api/cron/deliver
+#   CRON_SECRET         the SAME value set in the Vercel project env
+# Until DELIVERY_CRON_URL is set the job self-skips (no failures, no calls).
+#
+# The endpoint is idempotent (per-card idempotency keys → never double-sends)
+# and only flushes ALREADY-DUE jobs, so calling it often is safe.
+name: scheduled-delivery
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # every 15 minutes (GitHub may batch/delay off-peak)
+  workflow_dispatch: {} # allow a manual "run now" from the Actions tab
+
+jobs:
+  flush-due-deliveries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the delivery worker
+        env:
+          DELIVERY_CRON_URL: ${{ secrets.DELIVERY_CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$DELIVERY_CRON_URL" ]; then
+            echo "DELIVERY_CRON_URL not set — skipping (configure it to enable timely scheduled delivery)."
+            exit 0
+          fi
+          echo "Calling delivery worker…"
+          code=$(curl -sS -o /tmp/body.txt -w '%{http_code}' \
+            -X POST "$DELIVERY_CRON_URL" \
+            -H "Authorization: Bearer ${CRON_SECRET}")
+          echo "HTTP $code"
+          cat /tmp/body.txt
+          # Fail the run on a real error so it surfaces in the Actions tab.
+          if [ "$code" -ge 400 ]; then
+            echo "::error::Delivery worker returned HTTP $code"
+            exit 1
+          fi
