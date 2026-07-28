@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { GiftCardPreview } from '@/components/gift-card/gift-card-preview'
 import { formatMoney, parseMajorToMinor } from '@/lib/money'
 import { normalizeIsraeliPhone, isFullName } from '@/lib/validation/purchase'
+import { checkEmail } from '@/lib/validation/email'
 import { cn } from '@/lib/utils'
 import { Check, ChevronLeft, ChevronRight, Loader } from '@/components/icons'
 import { startPurchase } from '@/app/actions/purchase'
@@ -72,7 +73,11 @@ export function PurchaseWizard({ templates, settings }: Props) {
   const template = useMemo(() => templates.find((t) => t.id === templateId) ?? templates[0], [templates, templateId])
   const senderTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || settings.timezone
 
-  const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+  // Strict email check (no spaces, valid TLD, provider-typo detection). Shared
+  // with the server so the client blocks exactly what the server would reject,
+  // and surfaces typo suggestions ("did you mean …@gmail.com?").
+  const emailOk = (v: string) => checkEmail(v).ok
+  const emailError = (v: string) => checkEmail(v).error ?? 'כתובת אימייל לא תקינה'
   const phoneOk = (v: string) => normalizeIsraeliPhone(v) !== null
   // Full name = first + last, letters only. Shared with the server so the
   // client blocks exactly what Grow would reject (427 on fullName).
@@ -279,7 +284,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
               )}
               <Field label="אימייל" type="email" dir="ltr" value={buyerEmail} onChange={setBuyerEmail} required />
               {buyerEmail.length > 0 && !emailOk(buyerEmail) && (
-                <p className="text-sm text-destructive">כתובת אימייל לא תקינה.</p>
+                <p className="text-sm text-destructive">{emailError(buyerEmail)}</p>
               )}
               <Field label="טלפון (נייד ישראלי)" type="tel" dir="ltr" value={buyerPhone} onChange={setBuyerPhone} required />
               {buyerPhone.length > 0 && !phoneOk(buyerPhone) && (
@@ -308,7 +313,7 @@ export function PurchaseWizard({ templates, settings }: Props) {
               )}
               <Field label="אימייל הנמען/ת" type="email" dir="ltr" value={recipientEmail} onChange={setRecipientEmail} required />
               {recipientEmail.length > 0 && !emailOk(recipientEmail) && (
-                <p className="text-xs text-destructive">כתובת אימייל לא תקינה.</p>
+                <p className="text-xs text-destructive">{emailError(recipientEmail)}</p>
               )}
               <Field label="טלפון נייד (נייד ישראלי)" type="tel" dir="ltr" value={recipientPhone} onChange={setRecipientPhone} required />
               {recipientPhone.trim().length > 0 && !phoneOk(recipientPhone) && (

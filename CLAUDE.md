@@ -201,9 +201,29 @@ Verified across phone (390) / tablet (820) / desktop (1440). Admin has a mobile 
   load-bearing — a single word / digits / empty name is exactly what caused `pageFieldSettings[fullName]`.
 - **buyerPhone + recipientPhone** are **required** valid Israeli mobiles (recipient phone was made
   required per the owner; flip back to optional-but-validated if conversion suffers).
+- **buyerEmail + recipientEmail** get **strict, 3-layer email validation** (see below).
 - The wizard blocks advancing per step, shows inline errors as you type, and on any server
   rejection **names the exact field(s) + jumps to the failing step** (no more dead-end generic
   "יש לתקן את השדות המסומנים" on the summary). Tests: `tests/unit/purchase-validation.test.ts`.
+
+### Email validation (3 layers — syntax, typo, deliverability)
+`lib/validation/email.ts` (client-safe, no deps) exports `checkEmail()` / `isValidEmail()`:
+1. **Syntax** — no spaces, exactly one `@`, valid local part, valid domain labels, TLD 2–24
+   letters, no double dots / leading-trailing hyphens. Rejects `yuval @gmail.com`, `x@gmail`,
+   `x@gmail.123`, `.x@a.com`, etc.
+2. **Typo detection** — a curated `KNOWN_TYPOS` table (`gmial.com`→`gmail.com`, `gmail.co`,
+   `gmail.con`, …) plus Levenshtein-distance-1 vs `POPULAR_DOMAINS` → blocks with a Hebrew
+   suggestion `האם התכוונת ל-<addr>?` (also exposed as `.suggestion`). The wizard shows this
+   exact message inline.
+3. **Deliverability (server-only, async)** — `lib/validation/email-deliverability.ts`
+   `domainCanReceiveMail()` does an MX lookup (falls back to A/AAAA) via `node:dns/promises`.
+   **Fail-OPEN**: only a definitively non-existent domain (`ENOTFOUND`/`ENODATA`) is rejected;
+   transient DNS errors never block a real buyer. `startPurchase` runs it for buyer+recipient
+   **in parallel** after Zod passes, returns per-field `fieldErrors` if a domain is unreachable.
+- ⚠️ **Keep the DNS check in its OWN module** (`email-deliverability.ts`, NOT `email.ts`): the
+  client purchase wizard imports `checkEmail` from `email.ts`, and any `node:dns` import in that
+  file **fails the client webpack build** (`UnhandledSchemeError: node:dns/promises`). That's why
+  it's split. Tests: `tests/unit/email-validation.test.ts` (syntax + typo; DNS is not unit-tested).
 
 ## Cross-browser QR scanner
 

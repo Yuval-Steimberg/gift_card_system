@@ -6,6 +6,7 @@ import { handlePaymentWebhook } from '@/lib/payments/webhook-handler'
 import { createPurchase } from '@/lib/gift-cards/service'
 import { getStore } from '@/lib/data'
 import { purchaseInputSchema } from '@/lib/validation/purchase'
+import { domainCanReceiveMail } from '@/lib/validation/email-deliverability'
 
 export interface StartPurchaseResponse {
   ok: boolean
@@ -25,6 +26,24 @@ export async function startPurchase(raw: unknown): Promise<StartPurchaseResponse
     }
     return { ok: false, message: 'יש לתקן את השדות המסומנים', fieldErrors }
   }
+
+  // Deliverability: the domain must actually accept mail (real MX/A record).
+  // This catches real-looking-but-dead domains (e.g. gmail typo'd to a domain
+  // that passes syntax). Fails OPEN on transient DNS errors so a real customer
+  // is never blocked by a hiccup — only a definitively non-existent domain is
+  // rejected. Both emails are checked in parallel.
+  const { buyerEmail, recipientEmail } = parsed.data
+  const [buyerReachable, recipientReachable] = await Promise.all([
+    domainCanReceiveMail(buyerEmail),
+    domainCanReceiveMail(recipientEmail),
+  ])
+  const deliverabilityErrors: Record<string, string> = {}
+  if (!buyerReachable) deliverabilityErrors.buyerEmail = 'לא נמצא שרת דואר לכתובת זו — בדקו את הדומיין'
+  if (!recipientReachable) deliverabilityErrors.recipientEmail = 'לא נמצא שרת דואר לכתובת זו — בדקו את הדומיין'
+  if (Object.keys(deliverabilityErrors).length > 0) {
+    return { ok: false, message: 'כתובת אימייל לא ניתנת למשלוח', fieldErrors: deliverabilityErrors }
+  }
+
   try {
     const result = await createPurchase(parsed.data)
     if (!result.ok) return { ok: false, message: result.message }

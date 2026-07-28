@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { checkEmail } from './email'
 
 /**
  * Shared purchase validation. Used on the client for UX and re-run on the
@@ -6,7 +7,16 @@ import { z } from 'zod'
  * additionally checked against system settings server-side.
  */
 
-const emailSchema = z.string().trim().email('כתובת אימייל לא תקינה').max(254)
+// Strict email: syntax + provider-typo detection (see lib/validation/email.ts).
+// Domain deliverability (MX/A) is checked async in the purchase action.
+const emailSchema = z
+  .string()
+  .trim()
+  .max(254)
+  .superRefine((v, ctx) => {
+    const r = checkEmail(v)
+    if (!r.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: r.error ?? 'כתובת אימייל לא תקינה' })
+  })
 
 /** Matches a real full name: first + last, Hebrew/Latin letters only (plus
  * space, hyphen, apostrophe, period) — NO digits or symbols. Grow rejects
