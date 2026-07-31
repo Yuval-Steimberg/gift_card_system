@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Check, Loader } from '@/components/icons'
+import { Check, Loader, Phone } from '@/components/icons'
 import { getPurchaseStatus, type PurchaseStatus } from '@/app/actions/purchase'
 
 export function Confirmation({ giftCardId }: { giftCardId: string }) {
@@ -70,11 +70,27 @@ export function Confirmation({ giftCardId }: { giftCardId: string }) {
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-secondary text-foreground">
             <Check className="h-8 w-8" />
           </div>
-          <h1 className="mt-6 text-3xl">קיבלנו את פנייתך</h1>
-          <p className="mt-2 text-muted-foreground">
-            אם התשלום עבר, השובר יישלח לנמען/ת במייל בדקות הקרובות — יחד עם אישור רכישה אליך.
-            אין צורך להישאר בעמוד. אם לא יתקבל מייל תוך זמן קצר, פנה/י אלינו ונשמח לעזור.
-          </p>
+          <h1 className="mt-6 text-2xl">תודה שבחרתם להעניק מתנה עם סיפור ומשמעות</h1>
+          <div className="mx-auto mt-4 max-w-md space-y-4 text-muted-foreground">
+            <p>
+              לאחר שהתשלום ייקלט במערכת, שובר המתנה יישלח ישירות לכתובת המייל של מקבל המתנה, ואתם
+              תקבלו למייל אישור על ביצוע התשלום.
+            </p>
+            <p>אנא ודאו שאישור התשלום התקבל בתיבת המייל שלכם.</p>
+            <p>
+              אם לא קיבלתם אותו בתוך מספר דקות, או אם יש לכם שאלה או שאתם זקוקים לעזרה, נשמח לעמוד
+              לרשותכם.
+            </p>
+            <p className="flex items-center justify-center gap-2 font-medium text-foreground">
+              <Phone className="h-4 w-4 text-primary" />
+              <span>טלפון:</span>
+              <a href="tel:+972587876549" dir="ltr" style={{ unicodeBidi: 'embed' }} className="underline-offset-2 hover:underline">
+                058-787-6549
+              </a>
+            </p>
+            <p>מחכים לארח אתכם במתחם Just a Second, בגין 34, תל אביב.</p>
+            <p>תודה שבחרתם להיות חלק מהעשייה שלנו.</p>
+          </div>
           <div className="mt-6 flex justify-center">
             <Button asChild variant="outline">
               <Link href="/">חזרה לדף הבית</Link>
