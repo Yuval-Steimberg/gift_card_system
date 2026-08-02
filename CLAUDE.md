@@ -210,10 +210,21 @@ shown as if it were revenue. The earlier seed inserted 5 sample cards (₪300/�
   **Never add fake cards here**; a test that needs cards creates them (see `tests/integration/`).
 - `supabase/seed.sql` (and the regenerated `setup.sql`) insert only the store location, the
   card designs and the `system_settings` singleton.
-- **`supabase/cleanup-demo-data.sql`** purges the sample cards/payments/ledger/redemptions/
-  delivery jobs/audit rows/fake staff from a database that already ran the old seed — it targets
-  the seed's deterministic UUIDs only, skips any profile linked to a real auth user, and is safe
-  to re-run. **Run it once on the live Supabase project.**
+- Two maintenance scripts, both verified against a real Postgres (setup.sql → seed → run):
+  - **`supabase/cleanup-demo-data.sql`** — surgical: purges only the OLD SEED's sample cards/
+    payments/ledger/redemptions/delivery jobs/audit rows/fake staff, by deterministic UUID.
+    Keeps real purchases. Skips profiles linked to a real auth user; a demo profile still
+    referenced by surviving history is deactivated instead of deleted. Safe to re-run.
+  - **`supabase/reset-gift-cards.sql`** — total: deletes **every** gift card and all of its
+    history (payments, events, refunds, ledger, redemptions, reversals, adjustments, delivery
+    jobs/attempts, accounting docs, notes, gift-card audit rows, idempotency keys), so /admin
+    drops to ₪0 and an empty שוברים list. KEEPS settings, designs, store locations and staff.
+    Optional `keep_codes` list preserves named cards with their history. Destructive; wrapped
+    in one transaction; idempotent.
+  - Gotcha both scripts hit (don't regress): `audit_logs.entity_id` is **text**, so matching it
+    against card UUIDs needs `id::text`; and `profiles` is referenced without CASCADE from
+    redemptions/notes/adjustments/refunds/reversals/ledger/audit, so a blind profile DELETE can
+    fail on FK.
 - Contact details + business rules in the settings row are the real ones: `businessEmail`
   `justasecondil2@gmail.com`, `businessPhone` `058-787-6549`, `expiryMonths` **4** (matches the
   landing copy), min ₪50. The checkout confirmation page no longer hardcodes the phone — it
@@ -296,8 +307,9 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   funnel; now surfaces errors and revalidates `/gift-cards` + `/`.
 - **Hebrew gift-card PDF** — ✅ fixed (Heebo embedded, logical-order rendering; greeting/recipient/
   sender now show on the PDF + the recipient web page). See the PDF section above.
-- **Remaining non-code work:** run `supabase/cleanup-demo-data.sql` on the live project (purges the
-  old sample cards and fixes the placeholder contact details); confirm in `/admin → הגדרות` that
+- **Remaining non-code work:** clear the live project's test data — `supabase/reset-gift-cards.sql`
+  to wipe every card (dashboard → ₪0), or `cleanup-demo-data.sql` to remove just the old seed's
+  samples; it also fixes the placeholder contact details; confirm in `/admin → הגדרות` that
   expiry = **4 months** and the contact details are the real ones (new installs get them from the
   seed, but an existing settings row is never overwritten);
   legal/privacy review; revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on

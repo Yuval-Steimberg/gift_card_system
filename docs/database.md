@@ -18,6 +18,7 @@ Files:
 | `supabase/migrations/0003_functions.sql` | Atomic `redeem_gift_card`, `activate_gift_card_from_payment`, public `get_public_gift_card`. |
 | `supabase/seed.sql` | Baseline reference data — settings, card designs, store location (mirrors `lib/data/seed-data.ts`). **No sample cards.** |
 | `supabase/cleanup-demo-data.sql` | One-off purge of the sample cards/staff an older seed inserted. |
+| `supabase/reset-gift-cards.sql` | Deletes EVERY gift card + its history (keeps settings/designs/store/staff). Destructive. |
 | `scripts/db-migrate.mjs` / `scripts/db-seed.mjs` | Node ESM runners (see [Running](#running-migrations--seed)). |
 
 ---

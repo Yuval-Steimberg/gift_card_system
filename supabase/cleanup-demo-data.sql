@@ -15,6 +15,9 @@
 --
 -- Verify afterwards with the SELECT at the bottom, or /api/health (per-table
 -- counts), then reload /admin — the numbers should reflect real sales only.
+--
+-- Want to clear EVERY card, including your own test purchases, and start the
+-- dashboard from zero? Use supabase/reset-gift-cards.sql instead.
 -- =============================================================================
 
 BEGIN;
@@ -47,7 +50,7 @@ WHERE p.id = dp.id AND p.auth_user_id IS NOT NULL;
 --    these are not removed by the cascade below).
 DELETE FROM audit_logs
 WHERE entity_type = 'gift_card'
-  AND entity_id IN (SELECT id FROM demo_cards);
+  AND entity_id IN (SELECT id::text FROM demo_cards);  -- entity_id is text
 
 -- 2) Any remaining audit rows authored by a demo profile (FK: actor_id).
 DELETE FROM audit_logs
@@ -67,7 +70,25 @@ DELETE FROM gift_cards            WHERE id IN (SELECT id FROM demo_cards);
 
 -- 5) Demo staff (user_roles cascade). Real staff — created via Supabase Auth —
 --    have random ids and were filtered out above.
-DELETE FROM profiles WHERE id IN (SELECT id FROM demo_profiles);
+--    A demo profile can only be DELETED if nothing else still points at it:
+--    profiles are referenced without ON DELETE CASCADE from redemptions, notes,
+--    adjustments, refunds, reversals, role grants and the audit log, and a
+--    surviving real card may carry such a row. Anything still referenced is
+--    DEACTIVATED instead (is_active = false) — it can no longer sign in or be
+--    granted anything, and the history that points at it stays intact.
+DELETE FROM profiles p
+WHERE p.id IN (SELECT id FROM demo_profiles)
+  AND NOT EXISTS (SELECT 1 FROM gift_card_redemptions x WHERE x.employee_id = p.id)
+  AND NOT EXISTS (SELECT 1 FROM internal_notes x        WHERE x.author_id = p.id)
+  AND NOT EXISTS (SELECT 1 FROM balance_adjustments x   WHERE x.created_by = p.id OR x.approved_by = p.id)
+  AND NOT EXISTS (SELECT 1 FROM refunds x               WHERE x.created_by = p.id)
+  AND NOT EXISTS (SELECT 1 FROM redemption_reversals x  WHERE x.requested_by = p.id OR x.approved_by = p.id)
+  AND NOT EXISTS (SELECT 1 FROM gift_card_ledger_entries x WHERE x.created_by = p.id OR x.approved_by = p.id)
+  AND NOT EXISTS (SELECT 1 FROM user_roles x            WHERE x.granted_by = p.id)
+  AND NOT EXISTS (SELECT 1 FROM audit_logs x            WHERE x.actor_id = p.id);
+
+UPDATE profiles SET is_active = false
+WHERE id IN (SELECT id FROM demo_profiles);
 
 -- 6) Replace the placeholder contact details on the settings singleton. Keeps
 --    whatever a human already set: only the old seeded placeholders are changed.
@@ -99,7 +120,7 @@ SELECT
   (SELECT count(*) FROM gift_card_ledger_entries)                     AS ledger_entries,
   (SELECT count(*) FROM gift_card_redemptions)                        AS redemptions,
   (SELECT count(*) FROM delivery_jobs)                                AS delivery_jobs,
-  (SELECT count(*) FROM profiles)                                     AS staff_profiles,
+  (SELECT count(*) FILTER (WHERE is_active) FROM profiles)             AS active_staff,
   (SELECT coalesce(sum(initial_amount_minor), 0) FROM gift_cards)     AS total_sales_minor,
   (SELECT coalesce(sum(balance_minor), 0) FROM gift_cards
     WHERE status IN ('active', 'partially_redeemed', 'suspended'))    AS outstanding_minor;

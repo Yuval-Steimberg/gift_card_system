@@ -111,8 +111,11 @@ psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql \
 psql "$DATABASE_URL" -f supabase/seed.sql          # reference data: settings, designs, store
 # or:
 DATABASE_URL=... npm run db:migrate && npm run db:seed
-# Seeded a pre-2026 database that still holds the old sample cards? Purge them:
+# Database still holds the old sample cards? Purge just those:
 psql "$DATABASE_URL" -f supabase/cleanup-demo-data.sql
+# Or wipe EVERY card and start the dashboard from zero (destructive; keeps
+# settings, designs, store locations and staff):
+psql "$DATABASE_URL" -f supabase/reset-gift-cards.sql
 ```
 
 Once `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set, `getStore()`

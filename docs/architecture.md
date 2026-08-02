@@ -63,7 +63,8 @@ supabase/
 ├── migrations/0002_rls.sql          RLS deny-by-default + role scoping
 ├── migrations/0003_functions.sql    redeem_gift_card, activate_..., get_public_...
 ├── seed.sql                         reference data only (no sample cards)
-└── cleanup-demo-data.sql            purge sample rows from an older seed
+├── cleanup-demo-data.sql            purge sample rows from an older seed
+└── reset-gift-cards.sql             wipe all cards + history (keeps config)
 scripts/db-migrate.mjs  scripts/db-seed.mjs
 ```
 
