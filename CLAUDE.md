@@ -34,8 +34,9 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 ## How it runs (two modes, one interface)
 
 `lib/data/store.ts` defines `GiftCardStore`. `getStore()` (`lib/data/index.ts`) picks:
-- **MemoryStore** (default, offline) — seeded, mutex-atomic. Used when Supabase env is absent.
-  This is the local-dev + test target. Data is ephemeral.
+- **MemoryStore** (default, offline) — mutex-atomic. Used when Supabase env is absent.
+  This is the local-dev + test target. Data is ephemeral. Starts with configuration only
+  (settings, designs, store location) and **zero gift cards** — see "No mock data" below.
 - **SupabaseStore** (production) — when `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
   are set. Atomic ops delegate to the SQL functions in `supabase/migrations/0003_functions.sql`.
 
@@ -122,7 +123,8 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 
 1. **Supabase must be seeded, not just migrated.** Empty `system_settings` → pages error.
    Run `supabase/setup.sql` (all-in-one) in the SQL Editor. Confirm via `/api/health`
-   (`migrationsRan`, `seedRan`, per-table counts).
+   (`migrationsRan`, `seedRan`, per-table counts). The seed is **reference data only** — it
+   never inserts gift cards (see "No mock data" below).
 2. **Vercel env-var changes need a redeploy** to take effect. If a var "isn't working," check
    `/api/health` `build`/`env` flags to confirm the LIVE deploy actually has it.
 3. **`serverEnv()` must never throw for provider config.** It's called on hot paths (auth session
@@ -193,6 +195,32 @@ line **single-script**: mixed Latin+Hebrew in one `drawText` reverses the Hebrew
 values. Greeting wraps on word boundaries. The recipient web page (`/gift/[token]`) also shows the
 full message in a dedicated "הודעה אישית" section (the card-art preview clamps to ~2 lines).
 To eyeball changes: generate a card and `python3 -c "import fitz; ...get_pixmap().save('x.png')"`.
+
+## No mock data — every number in /admin is real
+
+The dashboard, reports and CSV export compute **everything** (total sales, outstanding
+balance, redeemed, redemption rate, per-design breakdown) by summing the `gift_cards` /
+ledger rows in the active store. So any seeded sample card is money the owner never took,
+shown as if it were revenue. The earlier seed inserted 5 sample cards (₪300/₪500/₪100/₪200/₪250
+= ₪1,150 of phantom sales, ₪280 phantom redemptions) plus 6 fake staff profiles — both in
+`lib/data/seed-data.ts` and `supabase/seed.sql`, so the live Supabase deployment showed them too.
+
+- `lib/data/seed-data.ts` now returns **configuration only**: `defaultSystemSettings()`,
+  `GIFT_CARD_TEMPLATES`, `STORE_LOCATIONS` — `cards`/`ledger`/`payments`/`redemptions` are `[]`.
+  **Never add fake cards here**; a test that needs cards creates them (see `tests/integration/`).
+- `supabase/seed.sql` (and the regenerated `setup.sql`) insert only the store location, the
+  card designs and the `system_settings` singleton.
+- **`supabase/cleanup-demo-data.sql`** purges the sample cards/payments/ledger/redemptions/
+  delivery jobs/audit rows/fake staff from a database that already ran the old seed — it targets
+  the seed's deterministic UUIDs only, skips any profile linked to a real auth user, and is safe
+  to re-run. **Run it once on the live Supabase project.**
+- Contact details + business rules in the settings row are the real ones: `businessEmail`
+  `justasecondil2@gmail.com`, `businessPhone` `058-787-6549`, `expiryMonths` **4** (matches the
+  landing copy), min ₪50. The checkout confirmation page no longer hardcodes the phone — it
+  reads `settings.businessPhone` (blank ⇒ the phone line is hidden, same on `/gift/[token]`).
+- Offline demo *logins* (`owner@justasecond.example` … , password `password`) still exist in
+  `lib/auth/users.ts` — they are dev-only auth, not data, and the login page hides them in
+  production/when Supabase is configured.
 
 ## Performance (admin felt slow — fixed; keep these)
 
@@ -268,8 +296,10 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   funnel; now surfaces errors and revalidates `/gift-cards` + `/`.
 - **Hebrew gift-card PDF** — ✅ fixed (Heebo embedded, logical-order rendering; greeting/recipient/
   sender now show on the PDF + the recipient web page). See the PDF section above.
-- **Remaining non-code work:** update `businessEmail`→`justasecondil2@gmail.com` + real store phone in
-  settings; set gift-card **expiry to 4 months** in `/admin → הגדרות` (the new landing copy says 4);
+- **Remaining non-code work:** run `supabase/cleanup-demo-data.sql` on the live project (purges the
+  old sample cards and fixes the placeholder contact details); confirm in `/admin → הגדרות` that
+  expiry = **4 months** and the contact details are the real ones (new installs get them from the
+  seed, but an existing settings row is never overwritten);
   legal/privacy review; revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on
   the Wix site; rotate any secrets shared in chat; Sentry DSN; Supabase backups. Optional code: an
   in-`/admin` staff-management page (invite by email + role) to avoid SQL.

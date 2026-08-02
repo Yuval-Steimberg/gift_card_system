@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -490,12 +490,14 @@ function Field({
   dir?: 'ltr' | 'rtl'
   required?: boolean
 }) {
+  // Associate the label with its input so screen readers (and tests) can find it.
+  const id = useId()
   return (
     <div className="space-y-1.5">
-      <Label>
+      <Label htmlFor={id}>
         {label} {required && <span className="text-primary">*</span>}
       </Label>
-      <Input type={type} dir={dir} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input id={id} type={type} dir={dir} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   )
 }

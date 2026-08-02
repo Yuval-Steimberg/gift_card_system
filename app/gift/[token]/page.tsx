@@ -113,10 +113,15 @@ export default async function GiftPage({ params }: { params: { token: string } }
         <div className="rounded-lg border border-border bg-card p-5 text-sm shadow-jas-1">
           <h2 className="font-bold">מימוש בחנות</h2>
           <p className="mt-1 text-muted-foreground">
-            הציגו את הקוד או ה-QR בקופה. {settings.businessName} · {settings.storeAddress} ·{' '}
-            <span dir="ltr" style={{ unicodeBidi: 'embed' }}>
-              {settings.businessPhone}
-            </span>
+            הציגו את הקוד או ה-QR בקופה. {settings.businessName} · {settings.storeAddress}
+            {settings.businessPhone && (
+              <>
+                {' · '}
+                <span dir="ltr" style={{ unicodeBidi: 'embed' }}>
+                  {settings.businessPhone}
+                </span>
+              </>
+            )}
           </p>
           <div className="mt-3 flex items-center justify-between">
             <a href="/terms" className="text-xs text-muted-foreground underline-offset-2 hover:underline">

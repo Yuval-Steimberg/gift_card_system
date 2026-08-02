@@ -20,12 +20,14 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
   const [result, setResult] = useState<RedeemResponse | null>(null)
   const [offline, setOffline] = useState(false)
 
-  async function doLookup(value?: string) {
+  // `keepResult` is used by the post-redemption refresh: re-reading the card must
+  // NOT wipe the "הפדיון בוצע בהצלחה · יתרה מעודכנת" banner the cashier just got.
+  async function doLookup(value?: string, keepResult = false) {
     const q = (value ?? code).trim()
     if (!q) return
     if (value) setCode(value)
     setLooking(true)
-    setResult(null)
+    if (!keepResult) setResult(null)
     setLookup(null)
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setOffline(true)
@@ -70,8 +72,8 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
       })
       setResult(res)
       if (res.ok) {
-        // refresh card view
-        await doLookup(lookup.card.code)
+        // refresh card view, keeping the success banner visible
+        await doLookup(lookup.card.code, true)
       }
     } finally {
       setRedeeming(false)

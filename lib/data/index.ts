@@ -16,11 +16,19 @@ import type { GiftCardStore } from './store'
  *
  * The MemoryStore is a process-global singleton so state persists across
  * requests within a running dev server.
+ *
+ * The singleton hangs off `globalThis`, NOT a module-level variable: Next.js
+ * bundles route handlers, server actions and pages separately, so a module
+ * variable gives each bundle its OWN store — a card bought through
+ * /api/webhooks/payment would then be invisible to /admin and /employee. One
+ * global keeps the whole process on one store, as the offline mode promises.
  */
-let store: GiftCardStore | null = null
+const globalStore = globalThis as typeof globalThis & { __jasGiftCardStore?: GiftCardStore | null }
 
 export function getStore(): GiftCardStore {
-  if (store) return store
+  const existing = globalStore.__jasGiftCardStore
+  if (existing) return existing
+  let store: GiftCardStore
   if (isSupabaseConfigured()) {
     store = new SupabaseStore()
   } else {
@@ -36,12 +44,13 @@ export function getStore(): GiftCardStore {
     }
     store = new MemoryStore()
   }
+  globalStore.__jasGiftCardStore = store
   return store
 }
 
 /** Test helper to reset the in-memory singleton between tests. */
 export function _resetStore(): void {
-  store = null
+  globalStore.__jasGiftCardStore = null
 }
 
 export type { GiftCardStore } from './store'

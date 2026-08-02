@@ -1,5 +1,15 @@
 import type { Role } from '@/lib/permissions/roles'
-import { DEMO_USERS } from '@/lib/data/seed-data'
+import { STORE_ID } from '@/lib/data/seed-data'
+
+/** Deterministic ids for the offline demo accounts (local development only). */
+export const DEMO_USERS = {
+  owner: 'user-owner',
+  admin: 'user-admin',
+  manager: 'user-manager',
+  employee1: 'user-employee-1',
+  employee2: 'user-employee-2',
+  finance: 'user-finance',
+} as const
 
 export interface AppUser {
   id: string
@@ -19,11 +29,11 @@ export interface AppUser {
 export const DEMO_PASSWORD = 'password'
 
 export const DEMO_USER_LIST: AppUser[] = [
-  { id: DEMO_USERS.owner, email: 'owner@justasecond.example', name: 'נעה ברנט', role: 'owner', storeLocationId: 'store-tlv', active: true },
-  { id: DEMO_USERS.admin, email: 'admin@justasecond.example', name: 'אדמין', role: 'admin', storeLocationId: 'store-tlv', active: true },
-  { id: DEMO_USERS.manager, email: 'manager@justasecond.example', name: 'מנהל חנות', role: 'store_manager', storeLocationId: 'store-tlv', active: true },
-  { id: DEMO_USERS.employee1, email: 'employee1@justasecond.example', name: 'עובד/ת א׳', role: 'store_employee', storeLocationId: 'store-tlv', active: true },
-  { id: DEMO_USERS.employee2, email: 'employee2@justasecond.example', name: 'עובד/ת ב׳', role: 'store_employee', storeLocationId: 'store-tlv', active: true },
+  { id: DEMO_USERS.owner, email: 'owner@justasecond.example', name: 'נעה ברנט', role: 'owner', storeLocationId: STORE_ID, active: true },
+  { id: DEMO_USERS.admin, email: 'admin@justasecond.example', name: 'אדמין', role: 'admin', storeLocationId: STORE_ID, active: true },
+  { id: DEMO_USERS.manager, email: 'manager@justasecond.example', name: 'מנהל חנות', role: 'store_manager', storeLocationId: STORE_ID, active: true },
+  { id: DEMO_USERS.employee1, email: 'employee1@justasecond.example', name: 'עובד/ת א׳', role: 'store_employee', storeLocationId: STORE_ID, active: true },
+  { id: DEMO_USERS.employee2, email: 'employee2@justasecond.example', name: 'עובד/ת ב׳', role: 'store_employee', storeLocationId: STORE_ID, active: true },
   { id: DEMO_USERS.finance, email: 'finance@justasecond.example', name: 'כספים', role: 'finance', storeLocationId: null, active: true },
 ]
 

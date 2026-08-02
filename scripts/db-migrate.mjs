@@ -32,7 +32,7 @@ function printManualInstructions(files) {
   for (const f of files) {
     console.log(`  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/${f}`)
   }
-  console.log('  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql   # optional demo data\n')
+  console.log('  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql   # settings, designs, store\n')
 }
 
 async function main() {

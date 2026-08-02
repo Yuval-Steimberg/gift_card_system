@@ -7,9 +7,13 @@ The system is independent of Wix and can be linked from the existing site with a
 “Buy a Gift Card” button.
 
 > **Runs with zero external credentials.** Out of the box the app uses an in-memory
-> (seeded) store and mock payment/email/receipt providers, so you can experience the
+> store and mock payment/email/receipt providers, so you can experience the
 > **entire** purchase → deliver → redeem → admin flow locally without Supabase, Grow, or
 > any API key. Configure real services when you’re ready.
+>
+> **No sample gift cards are ever created.** The store seeds configuration only
+> (settings, card designs, the store location), so every figure in `/admin` comes from
+> real purchases and a fresh install starts at zero.
 
 ## Table of contents
 
@@ -77,11 +81,11 @@ Then try the flow:
    and redeem by code or QR.
 4. **Admin:** open `/admin`, sign in as `owner@justasecond.example` / `password`.
 
-**Demo accounts** (offline auth; password `password`): `owner@`, `admin@`, `manager@`,
-`employee1@`, `employee2@`, `finance@` `justasecond.example`.
-**Seeded demo card codes** include `JAS-7F3K-QP2M-9` (active), `JAS-3M9T-XK4P-2`
-(partially redeemed), `JAS-8P2W-RT6N-5` (fully redeemed), `JAS-QW1E-AS2D-7` (expired),
-`JAS-ZX3C-VB4N-8` (suspended).
+**Demo accounts** (offline auth only, never on a Supabase deployment; password
+`password`): `owner@`, `admin@`, `manager@`, `employee1@`, `employee2@`, `finance@`
+`justasecond.example`.
+**No sample cards are seeded** — to get a card to redeem, buy one through the funnel
+above (step 1) and use the code from the confirmation page.
 
 ## Environment variables
 
@@ -104,9 +108,11 @@ supabase db push                                  # Supabase CLI
 psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql \
                      -f supabase/migrations/0002_rls.sql \
                      -f supabase/migrations/0003_functions.sql
-psql "$DATABASE_URL" -f supabase/seed.sql          # demo data (optional)
+psql "$DATABASE_URL" -f supabase/seed.sql          # reference data: settings, designs, store
 # or:
 DATABASE_URL=... npm run db:migrate && npm run db:seed
+# Seeded a pre-2026 database that still holds the old sample cards? Purge them:
+psql "$DATABASE_URL" -f supabase/cleanup-demo-data.sql
 ```
 
 Once `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set, `getStore()`

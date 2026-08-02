@@ -62,7 +62,8 @@ supabase/
 ├── migrations/0001_init.sql         enums, tables, constraints, indexes
 ├── migrations/0002_rls.sql          RLS deny-by-default + role scoping
 ├── migrations/0003_functions.sql    redeem_gift_card, activate_..., get_public_...
-└── seed.sql                         deterministic demo data
+├── seed.sql                         reference data only (no sample cards)
+└── cleanup-demo-data.sql            purge sample rows from an older seed
 scripts/db-migrate.mjs  scripts/db-seed.mjs
 ```
 
@@ -92,10 +93,12 @@ the browser bundle.
 `lib/data/store.ts` defines the `GiftCardStore` interface. Two implementations:
 
 - **`MemoryStore`** (`lib/data/memory-store.ts`) — the **offline default**.
-  Seeded from `lib/data/seed-data.ts`, fully in-memory, a process-global
-  singleton so state persists across requests in a running dev server. Atomic
-  operations are serialized by a **per-card mutex** (`lib/data/mutex.ts`), giving
-  tests and the demo the same atomic contract as production.
+  Initialized from `lib/data/seed-data.ts` with configuration only — settings,
+  card designs, the store location, and **zero gift cards**, so local dashboards
+  show real activity only. Fully in-memory, a process-global singleton so state
+  persists across requests in a running dev server. Atomic operations are
+  serialized by a **per-card mutex** (`lib/data/mutex.ts`), giving tests the same
+  atomic contract as production.
 - **`SupabaseStore`** (`lib/data/supabase-store.ts`) — **production**. Delegates
   every balance-changing operation to Postgres RPCs (`redeem_gift_card`,
   `activate_gift_card_from_payment`, `reverse_redemption`, `apply_ledger_adjustment`,

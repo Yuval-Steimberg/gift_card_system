@@ -6,7 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Check, Loader, Phone } from '@/components/icons'
 import { getPurchaseStatus, type PurchaseStatus } from '@/app/actions/purchase'
 
-export function Confirmation({ giftCardId }: { giftCardId: string }) {
+/** tel: href for an Israeli number as typed in settings (058-787-6549 -> +972587876549). */
+function telHref(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  return digits.startsWith('0') ? `tel:+972${digits.slice(1)}` : `tel:${digits}`
+}
+
+export function Confirmation({ giftCardId, contactPhone }: { giftCardId: string; contactPhone: string }) {
   const [status, setStatus] = useState<PurchaseStatus | null>(null)
   const [tries, setTries] = useState(0)
 
@@ -81,13 +87,15 @@ export function Confirmation({ giftCardId }: { giftCardId: string }) {
               אם לא קיבלתם אותו בתוך מספר דקות, או אם יש לכם שאלה או שאתם זקוקים לעזרה, נשמח לעמוד
               לרשותכם.
             </p>
-            <p className="flex items-center justify-center gap-2 font-medium text-foreground">
-              <Phone className="h-4 w-4 text-primary" />
-              <span>טלפון:</span>
-              <a href="tel:+972587876549" dir="ltr" style={{ unicodeBidi: 'embed' }} className="underline-offset-2 hover:underline">
-                058-787-6549
-              </a>
-            </p>
+            {contactPhone && (
+              <p className="flex items-center justify-center gap-2 font-medium text-foreground">
+                <Phone className="h-4 w-4 text-primary" />
+                <span>טלפון:</span>
+                <a href={telHref(contactPhone)} dir="ltr" style={{ unicodeBidi: 'embed' }} className="underline-offset-2 hover:underline">
+                  {contactPhone}
+                </a>
+              </p>
+            )}
             <p>מחכים לארח אתכם במתחם Just a Second, בגין 34, תל אביב.</p>
             <p>תודה שבחרתם להיות חלק מהעשייה שלנו.</p>
           </div>

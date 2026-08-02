@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // =============================================================================
-// db-seed.mjs — apply supabase/seed.sql (demo data).
+// db-seed.mjs — apply supabase/seed.sql (reference data: settings, card designs,
+// store location — no sample gift cards).
 // -----------------------------------------------------------------------------
 // Same contract as db-migrate.mjs: reads DATABASE_URL / SUPABASE_DB_URL, uses
 // `pg` if available else prints the psql command, and never requires
@@ -61,13 +62,13 @@ async function main() {
   }
 
   try {
-    process.stdout.write('Seeding demo data ... ')
+    process.stdout.write('Seeding reference data ... ')
     await client.query('BEGIN')
     try {
       await client.query(sql)
       await client.query('COMMIT')
       console.log('ok')
-      console.log('Demo data seeded successfully.')
+      console.log('Reference data seeded successfully (no sample cards).')
     } catch (err) {
       await client.query('ROLLBACK')
       console.log('FAILED')

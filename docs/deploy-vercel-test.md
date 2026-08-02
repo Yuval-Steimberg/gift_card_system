@@ -22,8 +22,10 @@ activation runs, but nothing is charged.
    - `supabase/migrations/0001_init.sql`
    - `supabase/migrations/0002_rls.sql`
    - `supabase/migrations/0003_functions.sql`
-3. (Recommended for a demo) run `supabase/seed.sql` to load demo templates, a store, and
-   sample gift cards in every state.
+3. Run `supabase/seed.sql` to load the card designs, the store location and the
+   system-settings row (required — the app errors without settings). It creates **no**
+   gift cards: `/admin` starts at zero and only ever shows real sales. If this database
+   was seeded with the old demo cards, run `supabase/cleanup-demo-data.sql` to purge them.
 
    Alternatively, with the Supabase CLI: `supabase db push` then `psql "$DB_URL" -f supabase/seed.sql`.
 

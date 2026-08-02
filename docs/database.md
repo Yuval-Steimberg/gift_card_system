@@ -16,7 +16,8 @@ Files:
 | `supabase/migrations/0001_init.sql` | Enums, tables, constraints, indexes, `updated_at` triggers, role catalogue. |
 | `supabase/migrations/0002_rls.sql` | Row-Level Security: deny-by-default, staff read scoping, RBAC helpers. |
 | `supabase/migrations/0003_functions.sql` | Atomic `redeem_gift_card`, `activate_gift_card_from_payment`, public `get_public_gift_card`. |
-| `supabase/seed.sql` | Deterministic demo data (mirrors `lib/data/seed-data.ts`). |
+| `supabase/seed.sql` | Baseline reference data — settings, card designs, store location (mirrors `lib/data/seed-data.ts`). **No sample cards.** |
+| `supabase/cleanup-demo-data.sql` | One-off purge of the sample cards/staff an older seed inserted. |
 | `scripts/db-migrate.mjs` / `scripts/db-seed.mjs` | Node ESM runners (see [Running](#running-migrations--seed)). |
 
 ---
@@ -220,7 +221,7 @@ See `docs/redemption-security.md` for the full guarantees.
 
 ```bash
 supabase db push          # applies everything under supabase/
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql   # optional demo data
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql   # settings, designs, store
 ```
 
 ### Plain psql (in order)
