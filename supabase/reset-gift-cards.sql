@@ -17,65 +17,70 @@
 -- dashboard drops to ₪0 sales / ₪0 outstanding / ₪0 redeemed and 0 cards in
 -- every status, and the שוברים list is empty. Reload the page (no redeploy).
 --
--- HOW: Supabase → SQL Editor → paste → Run (service role / owner; RLS is FORCEd).
--- Idempotent: running it twice simply deletes nothing the second time.
+-- HOW: Supabase → SQL Editor → paste the WHOLE file → Run (service role / owner;
+-- RLS is FORCEd). Idempotent: running it twice deletes nothing the second time.
 --
--- WANT TO KEEP SOME CARDS? Fill in the KEEP_CODES list below — those codes and
--- their history survive. Leave it empty to delete everything.
+-- Everything lives in ONE `DO` block on purpose: the Supabase SQL Editor commits
+-- each statement on its own, so a script built from separate statements (or from
+-- temp tables) is neither atomic nor able to pass state along. A DO block is a
+-- single statement — it either fully applies or fully rolls back.
+--
+-- WANT TO KEEP SOME CARDS? Put their codes in `keep_codes` on the first line of
+-- the block — those cards and their history survive. Leave it empty to delete
+-- everything.
 -- =============================================================================
 
-BEGIN;
+DO $$
+DECLARE
+  -- e.g. ARRAY['JAS-4ZKX-QRT0-C', 'JAS-FTT1-R3GV-C']
+  keep_codes  text[] := ARRAY[]::text[];
+  doomed      uuid[];
+  n_cards     integer;
+  v_sales     bigint;
+BEGIN
+  SELECT array_agg(id), count(*), coalesce(sum(initial_amount_minor), 0)
+    INTO doomed, n_cards, v_sales
+  FROM gift_cards
+  WHERE NOT (code = ANY (keep_codes));
 
--- Codes to PRESERVE, e.g. VALUES ('JAS-4ZKX-QRT0-C'), ('JAS-FTT1-R3GV-C').
--- Leave the "WHERE false" row as the only entry to keep nothing.
-CREATE TEMP TABLE keep_codes (code text PRIMARY KEY) ON COMMIT DROP;
-INSERT INTO keep_codes (code)
-SELECT code FROM (VALUES ('')) AS v(code) WHERE false;
+  IF doomed IS NULL THEN
+    RAISE NOTICE 'No gift cards to delete — nothing changed.';
+    RETURN;
+  END IF;
 
--- The cards being removed.
-CREATE TEMP TABLE doomed_cards (id uuid PRIMARY KEY) ON COMMIT DROP;
-INSERT INTO doomed_cards (id)
-SELECT id FROM gift_cards WHERE code NOT IN (SELECT code FROM keep_codes);
+  RAISE NOTICE 'Deleting % gift card(s), % ILS of recorded value.', n_cards, v_sales / 100.0;
 
--- What is about to go (shown in the SQL Editor output).
-SELECT count(*) AS cards_to_delete,
-       coalesce(sum(gc.initial_amount_minor), 0) / 100.0 AS sales_value_ils
-FROM gift_cards gc JOIN doomed_cards d ON d.id = gc.id;
+  -- 1) Audit trail for those cards. audit_logs.entity_id is TEXT and is not a
+  --    foreign key, so nothing cascades to it and the ids need an explicit cast.
+  DELETE FROM audit_logs
+  WHERE entity_type = 'gift_card'
+    AND entity_id IN (SELECT unnest(doomed)::text);
 
--- 1) Audit trail for those cards (audit_logs.entity_id is not a FK, so nothing
---    cascades to it).
-DELETE FROM audit_logs
-WHERE entity_type = 'gift_card'
-  AND entity_id IN (SELECT id::text FROM doomed_cards);  -- entity_id is text
+  -- 2) Break the two pointers that would otherwise block the delete: the card ->
+  --    payment link, and the reissue chain (card -> superseding card).
+  UPDATE gift_cards SET payment_id = NULL            WHERE id = ANY (doomed);
+  UPDATE gift_cards SET superseded_by_card_id = NULL WHERE superseded_by_card_id = ANY (doomed);
 
--- 2) Break the two pointers that would otherwise block the delete: the card ->
---    payment link, and the reissue chain (card -> superseding card).
-UPDATE gift_cards SET payment_id = NULL
-WHERE id IN (SELECT id FROM doomed_cards);
+  -- 3) Rows whose FK is ON DELETE SET NULL — they would survive as orphans, so
+  --    delete them explicitly.
+  DELETE FROM payment_events       WHERE gift_card_id = ANY (doomed);
+  DELETE FROM accounting_documents WHERE gift_card_id = ANY (doomed);
 
-UPDATE gift_cards SET superseded_by_card_id = NULL
-WHERE superseded_by_card_id IN (SELECT id FROM doomed_cards);
+  -- 4) The cards themselves. ON DELETE CASCADE removes payments, refunds, ledger
+  --    entries, redemptions, reversals, balance adjustments, delivery jobs (and
+  --    their attempts) and internal notes along with them.
+  DELETE FROM gift_cards WHERE id = ANY (doomed);
 
--- 3) Rows whose FK is ON DELETE SET NULL — they would survive as orphans, so
---    delete them explicitly.
-DELETE FROM payment_events       WHERE gift_card_id IN (SELECT id FROM doomed_cards);
-DELETE FROM accounting_documents WHERE gift_card_id IN (SELECT id FROM doomed_cards);
+  -- 5) Standalone rows with no FK to a card: idempotency keys guarding replays of
+  --    the purchases just deleted, and provider callbacks that never matched a
+  --    card (gift_card_id IS NULL). Cleared only when nothing was kept.
+  IF coalesce(array_length(keep_codes, 1), 0) = 0 THEN
+    DELETE FROM idempotency_keys;
+    DELETE FROM payment_events;
+  END IF;
 
--- 4) The cards themselves. ON DELETE CASCADE removes payments, refunds, ledger
---    entries, redemptions, reversals, balance adjustments, delivery jobs (and
---    their attempts) and internal notes along with them.
-DELETE FROM gift_cards WHERE id IN (SELECT id FROM doomed_cards);
-
--- 5) Standalone rows with no FK to a card: the idempotency keys guarding replays
---    of the purchases just deleted, and provider callbacks that never matched a
---    card (gift_card_id IS NULL). Cleared only when nothing was kept.
-DELETE FROM idempotency_keys
-WHERE NOT EXISTS (SELECT 1 FROM keep_codes);
-
-DELETE FROM payment_events
-WHERE NOT EXISTS (SELECT 1 FROM keep_codes);
-
-COMMIT;
+  RAISE NOTICE 'Done. Settings, designs, store locations and staff were kept.';
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- Verify: every count should be 0 (or only the cards you chose to keep).
@@ -94,4 +99,5 @@ SELECT
   (SELECT coalesce(sum(balance_minor), 0) / 100.0 FROM gift_cards
      WHERE status IN ('active', 'partially_redeemed', 'suspended'))  AS outstanding_ils,
   (SELECT count(*) FROM gift_card_templates)                         AS designs_kept,
+  (SELECT count(*) FROM store_locations)                             AS stores_kept,
   (SELECT count(*) FROM system_settings)                             AS settings_kept;
