@@ -103,6 +103,9 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
   secrets `DELIVERY_CRON_URL` + `CRON_SECRET`; self-skips until set). See gotcha #11.
 
 ### Adding staff (production / Supabase Auth)
+Easiest path: create the Auth user in the dashboard, then run **`supabase/add-staff.sql`**
+(one DO block; email/name/role are variables at the top; refuses to run if the Auth user
+doesn't exist; re-runnable; `replace_roles` makes the given role their only one). Manually:
 1. Supabase → Authentication → Users → **Add user** (email + password, ✅ Auto Confirm).
 2. Supabase → SQL Editor: link the auth user to a profile + role (most-privileged role wins):
    ```sql

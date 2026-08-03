@@ -19,6 +19,7 @@ Files:
 | `supabase/seed.sql` | Baseline reference data — settings, card designs, store location (mirrors `lib/data/seed-data.ts`). **No sample cards.** |
 | `supabase/cleanup-demo-data.sql` | One-off purge of the sample cards/staff an older seed inserted. |
 | `supabase/reset-gift-cards.sql` | Deletes EVERY gift card + its history (keeps settings/designs/store/staff). Destructive. |
+| `supabase/add-staff.sql` | Links a Supabase Auth user to a staff profile + role. |
 | `scripts/db-migrate.mjs` / `scripts/db-seed.mjs` | Node ESM runners (see [Running](#running-migrations--seed)). |
 
 ---
