@@ -47,15 +47,35 @@ DECLARE
   -----------------------------------------------------------------------------
   v_auth_id uuid;
   v_prof_id uuid;
+  v_known   text;
 BEGIN
   staff_email := lower(trim(staff_email));
 
-  -- The Supabase Auth user must exist first (STEP 1 above).
-  SELECT id INTO v_auth_id FROM auth.users WHERE lower(email) = staff_email;
+  -- The Supabase Auth user must exist first (STEP 1 above). Soft-deleted users
+  -- (deleted_at set) don't count — Supabase keeps the row but the login is gone.
+  -- deleted_at is read via to_jsonb so this also works on Postgres builds/older
+  -- Supabase versions where the column doesn't exist.
+  SELECT u.id INTO v_auth_id
+  FROM auth.users u
+  WHERE lower(u.email) = staff_email
+    AND coalesce(to_jsonb(u) ->> 'deleted_at', '') = ''
+  LIMIT 1;
+
   IF v_auth_id IS NULL THEN
+    -- Show what IS in the Auth user list, so a typo or a wrong project is
+    -- obvious instead of a dead end.
+    SELECT string_agg(e, ', ') INTO v_known
+    FROM (
+      SELECT lower(u.email)
+             || CASE WHEN coalesce(to_jsonb(u) ->> 'deleted_at', '') <> ''
+                     THEN ' (deleted — recreate the user)' ELSE '' END AS e
+      FROM auth.users u ORDER BY 1 LIMIT 10
+    ) t;
+
     RAISE EXCEPTION
-      'No Supabase Auth user found for %. Create it under Authentication → Users → Add user (tick Auto Confirm User), then run this again. Nothing was changed.',
-      staff_email;
+      'No Supabase Auth user found for %. Create it under Authentication → Users → Add user (tick "Auto Confirm User"), then run this again. Nothing was changed. Auth users currently in THIS project: %',
+      staff_email,
+      coalesce(v_known, '(none — the Auth user list is empty)');
   END IF;
 
   -- Reuse an existing profile whether it was found by login or by email
