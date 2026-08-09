@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Logo } from './logo'
+import { ImpactNote } from './impact-note'
 
 export function SiteFooter() {
   return (
@@ -10,6 +11,7 @@ export function SiteFooter() {
           <p className="text-sm text-muted-foreground">
             ליצור שפע משפע. שוברי מתנה דיגיטליים לחנות Just A Second — מנחם בגין 34, תל אביב.
           </p>
+          <ImpactNote />
         </div>
         <nav className="flex flex-col gap-2 text-sm text-muted-foreground">
           <Link href="/gift-cards" className="hover:underline">

@@ -125,6 +125,11 @@ export const Loader = (p: IconProps) => (
     <path d="M12 3a9 9 0 1 0 9 9" />
   </Svg>
 )
+export const Heart = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z" />
+  </Svg>
+)
 export const Sparkle = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" />

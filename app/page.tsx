@@ -3,6 +3,7 @@ import { SiteHeader } from '@/components/site/site-header'
 import { SiteFooter } from '@/components/site/site-footer'
 import { Button } from '@/components/ui/button'
 import { GiftCardPreview } from '@/components/gift-card/gift-card-preview'
+import { ImpactNote } from '@/components/site/impact-note'
 import { getSettings } from '@/lib/gift-cards/service'
 import { formatMoney } from '@/lib/money'
 import { CreditCard, Gift, Mail, ShieldCheck } from '@/components/icons'
@@ -42,7 +43,10 @@ export default async function HomePage() {
                 <Link href="/#how">איך זה עובד</Link>
               </Button>
             </div>
-            <p className="text-sm text-muted-foreground">נפדה במנחם בגין 34, תל אביב</p>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">נפדה במנחם בגין 34, תל אביב</p>
+              <ImpactNote />
+            </div>
           </div>
           <div className="mx-auto w-full max-w-md">
             <GiftCardPreview
