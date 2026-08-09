@@ -63,7 +63,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 43 unit + integration tests (money, concurrency, idempotency)
+npm test               # 74 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -74,6 +74,8 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
 - **Hosting:** Vercel, production branch = `claude/gift-card-system-build-0oflq7`. Live at
   `gift-card-system-8i8e.vercel.app` **and the custom domain `gift.justasecond.co.il`** (attached, blue-check in Vercel).
 - **DB:** Supabase project configured; migrations + seed run; `/api/health` → `ok:true`.
+  **Test data was cleared (Aug 2026)** with `supabase/reset-gift-cards.sql` — every card + its
+  history is gone, so /admin now reports only real sales (see "No mock data").
 - **Payments:** `PAYMENT_PROVIDER=grow` via the **JAS Make.com scenario** (`MAKE_WEBHOOK_URL` set;
   `GROW_*` API keys NOT set — everything goes through Make). A **real ₪-charge was completed
   end-to-end** (Grow charged the card + issued a receipt). ⚠️ The one open item is Grow's
@@ -93,6 +95,9 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
 - **Auth (prod):** **Supabase Auth**, NOT the demo accounts. `owner@justasecond.example` +
   `AUTH_DEMO_PASSWORD` ONLY works offline; on the live deploy `login()` routes to Supabase Auth.
   Staff = a Supabase Auth user linked to a `profiles` row + a `user_roles` row (see "Adding staff").
+  Live staff: the owner, plus **ליאת (`liattrik@gmail.com`) as `store_manager`** — added via
+  `supabase/add-staff.sql` (Aug 2026). `store_manager` = redeem, reverse a redemption, read cards,
+  add notes, manage employees, read audit — NOT settings/refunds/reissue/exports (those need `admin`).
 - **₪1 test mode:** `/admin → הגדרות` set **min amount = 1** (custom amounts already on) to buy a
   ₪1 card through the real Grow flow. Revert min to 50 before public launch.
 - **Cron / scheduled delivery:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit).
@@ -186,6 +191,18 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     needs repo secrets `DELIVERY_CRON_URL` + `CRON_SECRET`). The endpoint is idempotent (per-card
     idempotency keys) so pinging it often never double-sends. Tests: `tests/integration/scheduled-delivery.test.ts`.
 
+12. **The Supabase SQL Editor commits every statement separately.** A maintenance script built
+    from several statements is therefore NOT atomic, and `CREATE TEMP TABLE … ON COMMIT DROP` is
+    dropped the instant it is created (`relation "keep_codes" does not exist`). That's why
+    `cleanup-demo-data.sql`, `reset-gift-cards.sql` and `add-staff.sql` are each ONE `DO $$ … $$`
+    block with plpgsql arrays instead of temp tables — a DO block is a single statement, so it
+    either fully applies or fully rolls back. Keep new scripts in that shape.
+13. **A module-level singleton is NOT process-global in Next.js.** Route handlers, server actions
+    and pages are bundled separately, so `let store` gave each bundle its own `MemoryStore` — a card
+    bought via `/api/webhooks/payment` was invisible to `/admin` and `/employee` offline (and the
+    "using the in-memory store" warning printed twice, one per bundle). `getStore()` now keeps it on
+    `globalThis.__jasGiftCardStore`. Same trap applies to any future in-process cache.
+
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 
 `lib/gift-cards/pdf.ts` embeds **Heebo** (`public/fonts/Heebo-Regular.ttf`, Hebrew + Latin +
@@ -222,8 +239,8 @@ shown as if it were revenue. The earlier seed inserted 5 sample cards (₪300/�
     history (payments, events, refunds, ledger, redemptions, reversals, adjustments, delivery
     jobs/attempts, accounting docs, notes, gift-card audit rows, idempotency keys), so /admin
     drops to ₪0 and an empty שוברים list. KEEPS settings, designs, store locations and staff.
-    Optional `keep_codes` list preserves named cards with their history. Destructive; wrapped
-    in one transaction; idempotent.
+    Optional `keep_codes` array preserves named cards with their history. Destructive; a single
+    atomic `DO` block (gotcha #12); idempotent.
   - Gotcha both scripts hit (don't regress): `audit_logs.entity_id` is **text**, so matching it
     against card UUIDs needs `id::text`; and `profiles` is referenced without CASCADE from
     redemptions/notes/adjustments/refunds/reversals/ledger/audit, so a blind profile DELETE can
@@ -235,6 +252,22 @@ shown as if it were revenue. The earlier seed inserted 5 sample cards (₪300/�
 - Offline demo *logins* (`owner@justasecond.example` … , password `password`) still exist in
   `lib/auth/users.ts` — they are dev-only auth, not data, and the login page hides them in
   production/when Supabase is configured.
+- Three defects surfaced by making the E2E buy its own card instead of using a seeded one — all
+  fixed, don't regress: the per-bundle store singleton (gotcha #13); the redemption console wiping
+  its own success banner in the post-redeem refresh (`doLookup(code, keepResult)`); and the wizard's
+  `Field` having no `htmlFor`/`id` (now `useId`), which broke screen readers and `getByLabel`.
+  `tests/e2e/purchase-redeem.spec.ts` is `describe.serial`: test 1 buys a ₪250 card and hands the
+  code to test 2, which redeems it. **No test may depend on seeded cards.**
+
+## Landing-page impact note (where the money goes)
+
+`components/site/impact-note.tsx` exports **`IMPACT_NOTE`** — one sentence, currently
+"הרווחים שלנו מוקדשים לסיוע נפשי לכוחות הביטחון." — rendered by `<ImpactNote />` in the **hero**
+(under the CTAs/address line, above the fold on a phone) and in the **site footer**. Deliberately
+quiet: muted text, small `Heart` icon in brand orange, no heading, no exclamation mark, same type
+scale as the redemption note above it. It is a **claim to the customer**, so keep it accurate — if
+the commitment is only a share of profits, change the constant to "חלק מהרווחים שלנו מוקדש ל…".
+Edit it in ONE place; both spots follow.
 
 ## Performance (admin felt slow — fixed; keep these)
 
@@ -310,11 +343,11 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   funnel; now surfaces errors and revalidates `/gift-cards` + `/`.
 - **Hebrew gift-card PDF** — ✅ fixed (Heebo embedded, logical-order rendering; greeting/recipient/
   sender now show on the PDF + the recipient web page). See the PDF section above.
-- **Remaining non-code work:** clear the live project's test data — `supabase/reset-gift-cards.sql`
-  to wipe every card (dashboard → ₪0), or `cleanup-demo-data.sql` to remove just the old seed's
-  samples; it also fixes the placeholder contact details; confirm in `/admin → הגדרות` that
-  expiry = **4 months** and the contact details are the real ones (new installs get them from the
-  seed, but an existing settings row is never overwritten);
-  legal/privacy review; revert `min amount` 1 → 50 before launch; add the "Buy a Gift Card" button on
-  the Wix site; rotate any secrets shared in chat; Sentry DSN; Supabase backups. Optional code: an
-  in-`/admin` staff-management page (invite by email + role) to avoid SQL.
+- **Live test data cleared** — ✅ done (Aug 2026) via `supabase/reset-gift-cards.sql`; /admin at ₪0.
+- **Staff** — ✅ ליאת added as `store_manager` via `supabase/add-staff.sql`.
+- **Remaining non-code work:** confirm in `/admin → הגדרות` that expiry = **4 months** and the
+  contact details are the real ones (a new install gets them from the seed, but an EXISTING settings
+  row is never overwritten by it); **revert `min amount` 1 → 50 before launch**; legal/privacy
+  review; add the "Buy a Gift Card" button on the Wix site; rotate any secrets shared in chat
+  (including ליאת's initial password); Sentry DSN; Supabase backups. Optional code: an in-`/admin`
+  staff-management page (invite by email + role) to avoid SQL.
