@@ -1576,7 +1576,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- System settings (singleton, id=1). Real business values — real contact
--- details, presets [₪100,₪250,₪500,₪1000], min ₪50, max ₪5000, expiry 4 months
+-- details, presets [₪100,₪250,₪500,₪1000], min ₪50, max ₪5000, expiry 12 months
 -- (matching the landing-page copy), partial redemption allowed. Every contact
 -- detail the customer sees is read from this row; change it in /admin → הגדרות.
 -- -----------------------------------------------------------------------------
@@ -1588,5 +1588,5 @@ INSERT INTO system_settings (
   1, 'Just A Second · ג׳אסט א סקונד', 'justasecondil2@gmail.com', '058-787-6549',
   'מנחם בגין 34, תל אביב', 'ILS', 'Asia/Jerusalem',
   ARRAY[10000, 25000, 50000, 100000]::bigint[], 5000, 500000, true,
-  4, true, 500, '/terms', 'he'
+  12, true, 500, '/terms', 'he'
 ) ON CONFLICT (id) DO NOTHING;

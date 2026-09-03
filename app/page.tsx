@@ -31,7 +31,7 @@ export default async function HomePage() {
                 <p className="font-semibold text-foreground">שימו לב:</p>
                 <ul className="mt-1 list-disc space-y-1 ps-5">
                   <li>השובר ניתן למימוש רק בחנות הפיזית שלנו. לא ניתן למימוש בחנות המקוונת.</li>
-                  <li>תוקף השובר לארבעה חודשים.</li>
+                  <li>תוקף השובר ל-12 חודשים.</li>
                 </ul>
               </div>
             </div>
@@ -51,7 +51,7 @@ export default async function HomePage() {
           <div className="mx-auto w-full max-w-md">
             <GiftCardPreview
               template={{ backgroundColor: '#333D36', textColor: '#FFFCF5', accentColor: '#E88225', name: '' }}
-              amountMinor={settings.presetAmountsMinor[1] ?? 20000}
+              amountMinor={18000}
               recipientName="יעל"
               senderName="דנה"
               greeting={'חשבתי עלייך.\nבחרי לך משהו יפה מהחנות שלהם.'}
