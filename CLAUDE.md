@@ -246,7 +246,7 @@ shown as if it were revenue. The earlier seed inserted 5 sample cards (₪300/�
     redemptions/notes/adjustments/refunds/reversals/ledger/audit, so a blind profile DELETE can
     fail on FK.
 - Contact details + business rules in the settings row are the real ones: `businessEmail`
-  `justasecondil2@gmail.com`, `businessPhone` `058-787-6549`, `expiryMonths` **4** (matches the
+  `justasecondil2@gmail.com`, `businessPhone` `058-787-6549`, `expiryMonths` **12** (matches the
   landing copy), min ₪50. The checkout confirmation page no longer hardcodes the phone — it
   reads `settings.businessPhone` (blank ⇒ the phone line is hidden, same on `/gift/[token]`).
 - Offline demo *logins* (`owner@justasecond.example` … , password `password`) still exist in
@@ -345,9 +345,11 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   sender now show on the PDF + the recipient web page). See the PDF section above.
 - **Live test data cleared** — ✅ done (Aug 2026) via `supabase/reset-gift-cards.sql`; /admin at ₪0.
 - **Staff** — ✅ ליאת added as `store_manager` via `supabase/add-staff.sql`.
-- **Remaining non-code work:** confirm in `/admin → הגדרות` that expiry = **4 months** and the
+- **Remaining non-code work:** confirm in `/admin → הגדרות` that expiry = **12 months** and the
   contact details are the real ones (a new install gets them from the seed, but an EXISTING settings
-  row is never overwritten by it); **revert `min amount` 1 → 50 before launch**; legal/privacy
+  row is never overwritten by it — the LIVE deploy's settings row must be updated by hand, e.g. via
+  `/admin → הגדרות` or `UPDATE system_settings SET expiry_months = 12 WHERE id = 1;`, to actually
+  change validity for existing/new cards); **revert `min amount` 1 → 50 before launch**; legal/privacy
   review; add the "Buy a Gift Card" button on the Wix site; rotate any secrets shared in chat
   (including ליאת's initial password); Sentry DSN; Supabase backups. Optional code: an in-`/admin`
   staff-management page (invite by email + role) to avoid SQL.

@@ -135,7 +135,7 @@ export function defaultSystemSettings(): SystemSettings {
     minAmountMinor: toMinor(50),
     maxAmountMinor: toMinor(5000),
     allowCustomAmount: true,
-    expiryMonths: 4,
+    expiryMonths: 12,
     allowPartialRedemption: true,
     greetingMaxLength: 500,
     termsUrl: '/terms',

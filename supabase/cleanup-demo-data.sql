@@ -112,11 +112,11 @@ END $$;
 
 -- -----------------------------------------------------------------------------
 -- OPTIONAL — before going public, undo the ₪1 test mode and align the card
--- expiry with the landing-page copy ("תוקף השובר לארבעה חודשים").
+-- expiry with the landing-page copy ("תוקף השובר ל-12 חודשים").
 -- Uncomment and run:
 -- -----------------------------------------------------------------------------
 -- UPDATE system_settings SET min_amount_minor = 5000 WHERE id = 1;  -- ₪50 minimum
--- UPDATE system_settings SET expiry_months   = 4    WHERE id = 1;
+-- UPDATE system_settings SET expiry_months   = 12   WHERE id = 1;
 
 -- -----------------------------------------------------------------------------
 -- Verify: what is left should be real purchases only (0 rows on a store that
