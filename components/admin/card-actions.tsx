@@ -8,6 +8,7 @@ import {
   adminAdjust,
   adminAddNote,
   adminCancel,
+  adminEditRecipient,
   adminMarkPaid,
   adminReactivate,
   adminRefund,
@@ -15,9 +16,11 @@ import {
   adminResend,
   adminSuspend,
 } from '@/app/admin/actions'
+import { checkEmail } from '@/lib/validation/email'
 
 export interface ActionPerms {
   resend: boolean
+  editRecipient: boolean
   suspend: boolean
   cancel: boolean
   refund: boolean
@@ -27,7 +30,23 @@ export interface ActionPerms {
   note: boolean
 }
 
-export function CardActions({ id, status, perms }: { id: string; status: string; perms: ActionPerms }) {
+export interface RecipientDetails {
+  name: string
+  email: string
+  phone: string | null
+}
+
+export function CardActions({
+  id,
+  status,
+  perms,
+  recipient,
+}: {
+  id: string
+  status: string
+  perms: ActionPerms
+  recipient: RecipientDetails
+}) {
   const [open, setOpen] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [amount, setAmount] = useState('')
@@ -35,6 +54,15 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
   const [note, setNote] = useState('')
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, start] = useTransition()
+
+  // Recipient edit form, seeded from the card's current details.
+  const [rName, setRName] = useState(recipient.name)
+  const [rEmail, setREmail] = useState(recipient.email)
+  const [rPhone, setRPhone] = useState(recipient.phone ?? '')
+  const [resendAfter, setResendAfter] = useState(true)
+
+  const emailChanged = rEmail.trim().toLowerCase() !== recipient.email.trim().toLowerCase()
+  const emailCheck = checkEmail(rEmail)
 
   const run = (fn: () => Promise<{ ok: boolean; message?: string }>, successText: string) => {
     setMsg(null)
@@ -47,6 +75,30 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
         setAmount('')
         setNote('')
       }
+    })
+  }
+
+  const saveRecipient = () => {
+    setMsg(null)
+    start(async () => {
+      const res = await adminEditRecipient(
+        id,
+        { recipientName: rName, recipientEmail: rEmail, recipientPhone: rPhone },
+        reason,
+        { resend: resendAfter },
+      )
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message ?? 'שגיאה' })
+        return
+      }
+      setMsg({
+        ok: true,
+        text: res.resent
+          ? `הפרטים עודכנו והשובר נשלח ל-${rEmail.trim()}`
+          : res.message ?? 'הפרטים עודכנו',
+      })
+      setOpen(null)
+      setReason('')
     })
   }
 
@@ -73,6 +125,7 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
             שליחה מחדש
           </Button>
         )}
+        {perms.editRecipient && <Toggle label="עריכת פרטי נמען/ת" onClick={() => setOpen(open === 'recipient' ? null : 'recipient')} />}
         {perms.suspend && isLive && <Toggle label="השהיה" onClick={() => setOpen(open === 'suspend' ? null : 'suspend')} />}
         {perms.suspend && isSuspended && (
           <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => adminReactivate(id, 'הפעלה מחדש'), 'הופעל')}>
@@ -86,7 +139,43 @@ export function CardActions({ id, status, perms }: { id: string; status: string;
         {perms.note && <Toggle label="הוספת הערה" onClick={() => setOpen(open === 'note' ? null : 'note')} />}
       </div>
 
-      {open && open !== 'adjust' && open !== 'note' && (
+      {open === 'recipient' && (
+        <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+          <p className="text-sm text-muted-foreground">
+            לשימוש כשהשובר לא הגיע לנמען/ת — למשל כתובת שגויה או שרת דואר ארגוני שחוסם אותנו.
+            &quot;שליחה מחדש&quot; לבדה תנסה שוב בדיוק את אותה הכתובת.
+          </p>
+          <label className="block text-sm">
+            שם הנמען/ת
+            <Input value={rName} onChange={(e) => setRName(e.target.value)} className="mt-1 h-9" />
+          </label>
+          <label className="block text-sm">
+            אימייל הנמען/ת
+            <Input dir="ltr" value={rEmail} onChange={(e) => setREmail(e.target.value)} className="mt-1 h-9" />
+          </label>
+          {rEmail.trim() && !emailCheck.ok && <p className="text-sm text-destructive">{emailCheck.error}</p>}
+          <label className="block text-sm">
+            טלפון הנמען/ת
+            <Input dir="ltr" value={rPhone} onChange={(e) => setRPhone(e.target.value)} className="mt-1 h-9" />
+          </label>
+          <Input
+            placeholder="סיבה (חובה, נשמר ביומן הביקורת)"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="h-9"
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={resendAfter} onChange={(e) => setResendAfter(e.target.checked)} />
+            שליחת השובר מיד לאחר העדכון
+            {emailChanged && <span className="text-muted-foreground">(הכתובת השתנתה)</span>}
+          </label>
+          <Button size="sm" disabled={pending || reason.trim().length < 3 || !emailCheck.ok} onClick={saveRecipient}>
+            שמירה{resendAfter ? ' ושליחה' : ''}
+          </Button>
+        </div>
+      )}
+
+      {open && open !== 'adjust' && open !== 'note' && open !== 'recipient' && (
         <ReasonBox
           reason={reason}
           setReason={setReason}

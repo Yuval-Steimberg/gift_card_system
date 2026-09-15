@@ -48,8 +48,15 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 - `lib/payments|delivery/email|accounting/` — provider interfaces + mock + real adapters + factory.
   Email adapters: `log`, `resend` (abandoned — needs subdomain MX), **`sendgrid`** (live; CNAME auth).
 - `app/admin/actions.ts` — `adminMarkPaid` (manual "mark paid & activate" for a paid card whose
-  webhook never landed; runs the same verified-activation path). `components/admin/card-actions.tsx`
-  shows the **"סימון כשולם והפעלה"** button on pre-activation cards.
+  webhook never landed; runs the same verified-activation path) and **`adminEditRecipient`**
+  (change the recipient name/email/phone + optionally resend in one step — the repair path when an
+  address bounces or a corporate tenant blocks us; plain "resend" only retries the address that just
+  failed). Both are wired into `components/admin/card-actions.tsx` (**"סימון כשולם והפעלה"** on
+  pre-activation cards, **"עריכת פרטי נמען/ת"** for `owner`/`admin` only — `giftcard:edit_recipient`).
+  `adminEditRecipient` validates SERVER-SIDE with the same `checkEmail`/`isFullName`/
+  `normalizeIsraeliPhone` rules as checkout, ignores blank fields (a half-filled form must not wipe a
+  recipient) and requires a reason for the audit log. Tests:
+  `tests/integration/edit-recipient.test.ts`.
 - `lib/auth/` — **dual-mode auth**: Supabase Auth (`supabase-auth.ts` + root `middleware.ts`) when
   Supabase is configured; demo cookie auth (`session.ts`/`users.ts`) offline. Roles from `user_roles`.
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
@@ -69,7 +76,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 111 unit + integration tests (money, concurrency, idempotency)
+npm test               # 114 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
