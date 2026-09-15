@@ -13,7 +13,7 @@ import type {
 } from '@/lib/gift-cards/types'
 import type { Minor } from '@/lib/money'
 import { supabaseAdmin } from './supabase-client'
-import { STALE_CLAIM_MS } from './store'
+import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
 import { defaultSystemSettings } from './seed-data'
 import type {
   ActivateFromPaymentInput,
@@ -117,17 +117,6 @@ export class SupabaseStore implements GiftCardStore {
     return data ? this.toCard(data) : null
   }
 
-  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
-    const { data } = await this.db
-      .from('gift_cards')
-      .select('id')
-      .ilike('buyer_email', email.trim())
-      .eq('initial_amount_minor', amountMinor)
-      .in('status', ['draft', 'awaiting_payment', 'payment_processing'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-    return data && data[0] ? String(data[0].id) : null
-  }
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
     const { data } = await this.db.from('gift_cards').select('*').eq('public_token', token).maybeSingle()
     return data ? this.toCard(data) : null
@@ -223,20 +212,30 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivateResult> {
+    // The RPC resolves the card (order_ref, else payer email + exact amount)
+    // and activates it in ONE transaction — see 0005_payment_matching.sql for
+    // why this must not be split into a lookup plus an activation.
     const { data, error } = await this.db.rpc('activate_gift_card_from_payment', {
-      p_gift_card_id: input.orderRef,
+      p_gift_card_id: input.orderRef || null,
       p_provider: input.provider,
       p_event_id: input.eventId,
       p_provider_payment_id: input.providerPaymentId,
       p_amount_minor: input.amountMinor,
       p_currency: input.currency,
       p_raw_event: input.rawEvent,
+      p_match_email: input.match?.email ?? null,
+      p_match_window: `${PAYMENT_MATCH_WINDOW_DAYS} days`,
     })
     if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
     const code = (row?.out_code ?? 'not_found') as ActivateResult['code']
-    const card = code === 'activated' || code === 'already_processed' ? await this.getGiftCardById(input.orderRef) : null
-    return { code, giftCard: card ?? undefined, message: row?.out_message }
+    // The RPC reports which card it resolved to; input.orderRef is usually empty.
+    const giftCardId = (row?.out_gift_card_id as string | null) ?? undefined
+    const card =
+      giftCardId && (code === 'activated' || code === 'already_processed')
+        ? await this.getGiftCardById(giftCardId)
+        : null
+    return { code, giftCardId, giftCard: card ?? undefined, message: row?.out_message }
   }
 
   async redeem(input: RedeemInput): Promise<RedeemResult> {

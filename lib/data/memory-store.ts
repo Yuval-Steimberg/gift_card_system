@@ -29,8 +29,13 @@ import type {
   ReversalInput,
   SystemSettings,
 } from './store'
-import { STALE_CLAIM_MS } from './store'
+import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
 import { seedMemoryStore } from './seed-data'
+
+/** Single lock guarding "which card does this payment belong to?" — the answer
+ *  is not known up front, so it cannot be a per-card lock. Mirrors the
+ *  FOR UPDATE SKIP LOCKED claim in 0005_payment_matching.sql. */
+const PAYMENT_MATCH_LOCK = '__payment_match__'
 
 interface Note {
   id: string
@@ -128,20 +133,6 @@ export class MemoryStore implements GiftCardStore {
     return c ? { ...c } : null
   }
 
-  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
-    const wanted = email.trim().toLowerCase()
-    const pending: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing']
-    const match = [...this.cards.values()]
-      .filter(
-        (c) =>
-          (c.buyerEmail ?? '').trim().toLowerCase() === wanted &&
-          c.initialAmountMinor === amountMinor &&
-          pending.includes(c.status),
-      )
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
-    return match ? match.id : null
-  }
-
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
     for (const c of this.cards.values()) if (c.publicToken === token) return { ...c }
     return null
@@ -234,14 +225,68 @@ export class MemoryStore implements GiftCardStore {
     })
   }
 
+  /**
+   * Resolve which card a provider callback paid for. Mirrors the SQL in
+   * 0005_payment_matching.sql: order_ref first, else the newest PENDING card
+   * with the exact amount whose buyer OR recipient address is the payer's,
+   * within the match window. Case-insensitive equality — never a LIKE pattern.
+   * Must only be called while holding PAYMENT_MATCH_LOCK.
+   */
+  private resolvePaidCardId(input: ActivateFromPaymentInput): string | null {
+    if (input.orderRef && this.cards.has(input.orderRef)) return input.orderRef
+    const email = input.match?.email?.trim().toLowerCase()
+    if (!email) return null
+    const notBefore = Date.now() - PAYMENT_MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    const pending: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing', 'failed']
+    const match = [...this.cards.values()]
+      .filter(
+        (c) =>
+          pending.includes(c.status) &&
+          c.initialAmountMinor === input.amountMinor &&
+          Date.parse(c.createdAt) > notBefore &&
+          ((c.buyerEmail ?? '').trim().toLowerCase() === email ||
+            (c.recipientEmail ?? '').trim().toLowerCase() === email),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
+    return match ? match.id : null
+  }
+
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivateResult> {
-    return this.mutex.runExclusive(input.orderRef, async () => {
+    // Resolve + activate without ever releasing a lock in between, so two
+    // callbacks arriving together cannot both claim the same pending card (the
+    // production path gets this from FOR UPDATE SKIP LOCKED inside one
+    // transaction). The resolve lock is global because the card identity is
+    // exactly what is not yet known; the per-card lock below is what actually
+    // guards the mutation against a concurrent redemption.
+    return this.mutex.runExclusive(PAYMENT_MATCH_LOCK, async () => {
       // Idempotency: a repeated verified webhook must not double-activate.
       if (this.processedEvents.has(input.eventId)) {
-        const card = this.cards.get(input.orderRef)
-        return { code: 'already_processed', giftCard: card ? { ...card } : undefined }
+        const priorId = this.processedEvents.get(input.eventId)!
+        if (!priorId) return { code: 'unmatched', message: 'no gift card matched this payment' }
+        const prior = this.cards.get(priorId)
+        return { code: 'already_processed', giftCardId: prior?.id, giftCard: prior ? { ...prior } : undefined }
       }
-      const card = this.cards.get(input.orderRef)
+      const cardId = this.resolvePaidCardId(input)
+      if (!cardId) {
+        this.processedEvents.set(input.eventId, '')
+        await this.appendAudit({
+          actorId: null,
+          actorRole: 'system',
+          action: 'payment.webhook_unmatched',
+          entityType: 'payment_event',
+          entityId: input.eventId,
+          reason: `no card matched (email=${input.match?.email ?? '—'} amount=${input.amountMinor})`,
+          metadata: { provider: input.provider, eventId: input.eventId, amountMinor: input.amountMinor },
+        })
+        return { code: 'unmatched', message: 'no gift card matched this payment' }
+      }
+      return this.activateResolvedCard(cardId, input)
+    })
+  }
+
+  private async activateResolvedCard(cardId: string, input: ActivateFromPaymentInput): Promise<ActivateResult> {
+    return this.mutex.runExclusive(cardId, async () => {
+      const card = this.cards.get(cardId)
       if (!card) return { code: 'not_found' }
 
       // Reconcile the paid amount against our authoritative stored amount.
@@ -261,16 +306,16 @@ export class MemoryStore implements GiftCardStore {
           reason: 'paid amount does not match order amount',
           metadata: { expected: card.initialAmountMinor, received: input.amountMinor },
         })
-        return { code: 'amount_mismatch', message: 'paid amount does not match order' }
+        return { code: 'amount_mismatch', giftCardId: card.id, message: 'paid amount does not match order' }
       }
 
       if (card.status === 'active' || card.status === 'partially_redeemed' || card.status === 'fully_redeemed') {
         // Already active from a prior event under a different id — record + noop.
         this.processedEvents.set(input.eventId, card.id)
-        return { code: 'already_processed', giftCard: { ...card } }
+        return { code: 'already_processed', giftCardId: card.id, giftCard: { ...card } }
       }
       if (!canTransition(card.status, 'active') && (card.status as string) !== 'paid') {
-        return { code: 'not_activatable', message: `cannot activate from ${card.status}` }
+        return { code: 'not_activatable', giftCardId: card.id, message: `cannot activate from ${card.status}` }
       }
 
       // Mark event processed BEFORE mutation (idempotency barrier within the lock).
@@ -304,7 +349,7 @@ export class MemoryStore implements GiftCardStore {
         reason: 'verified payment',
         metadata: { provider: input.provider, providerPaymentId: input.providerPaymentId },
       })
-      return { code: 'activated', giftCard: { ...card } }
+      return { code: 'activated', giftCardId: card.id, giftCard: { ...card } }
     })
   }
 

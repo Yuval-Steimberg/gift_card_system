@@ -8,6 +8,7 @@ import { generateGiftCardCode, generatePublicToken } from './codes'
 import { renderBuyerConfirmationEmail, renderRecipientEmail } from '@/lib/delivery/render'
 import { generateGiftCardPdf } from './pdf'
 import { recipientUrl } from './qr'
+import { reportError } from '@/lib/logging/report'
 import { sanitizeGreeting, sanitizeLine } from '@/lib/security/text'
 import { validateAmountAgainstSettings, type PurchaseInput } from '@/lib/validation/purchase'
 import { formatMoney } from '@/lib/money'
@@ -111,7 +112,6 @@ export async function createPurchase(input: PurchaseInput): Promise<CreatePurcha
       notifyUrl: `${base}/api/webhooks/payment`,
     })
   } catch (err) {
-    const { reportError } = await import('@/lib/logging/report')
     await reportError(err, { scope: 'createCheckoutSession', giftCardId: card.id, provider: env.PAYMENT_PROVIDER })
     return {
       ok: false,
@@ -154,45 +154,45 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
     return
   }
 
-  // Resolve which card this payment is for. Prefer the order reference; if the
-  // provider callback omits it (Grow "Payment Links" webhook doesn't echo our
-  // custom field), fall back to the newest pending card matching the payer's
-  // email + exact amount.
-  let cardId = event.orderRef
-  if (!cardId || !(await store.getGiftCardById(cardId))) {
-    if (event.customerEmail) {
-      const matched = await store.findPendingCardIdByEmailAndAmount(event.customerEmail, event.amountMinor)
-      if (matched) cardId = matched
-    }
-  }
-  if (!cardId) {
-    await store.appendAudit({
-      actorId: null,
-      actorRole: 'system',
-      action: 'payment.webhook_unmatched',
-      entityType: 'gift_card',
-      entityId: event.orderRef || event.eventId,
-      reason: `no card matched (email=${event.customerEmail ?? '—'} amount=${event.amountMinor})`,
-      metadata: { eventId: event.eventId },
-    })
-    return
-  }
-
+  // Resolve WHICH card this payment is for and activate it in ONE atomic store
+  // operation. Grow's Payment-Links callback does not echo our order_ref
+  // (gotcha #8d), so the store falls back to the payer's email + the exact
+  // amount — matched against the buyer AND the recipient address, because a
+  // company buying for its staff pays from an address our checkout never saw.
+  // Resolving here first, in a separate call, is what allowed two callbacks to
+  // claim the same pending card and leave the other one unpaid forever.
   const result = await store.activateFromPayment({
     eventId: event.eventId,
-    orderRef: cardId,
+    orderRef: event.orderRef,
     providerPaymentId: event.providerPaymentId,
     provider: event.provider,
     amountMinor: event.amountMinor,
     currency: event.currency,
     rawEvent: event.raw,
+    match: { email: event.customerEmail ?? null },
   })
+
+  // A real payment we cannot place: the store already recorded it (audit +
+  // payment_events). Report it too, so it reaches Sentry rather than only a
+  // table nobody reads — money was taken and no card was issued.
+  if (result.code === 'unmatched') {
+    await reportError(new Error('payment webhook matched no gift card'), {
+      scope: 'payment_webhook_unmatched',
+      eventId: event.eventId,
+      provider: event.provider,
+      payerEmail: event.customerEmail ?? null,
+      amountMinor: event.amountMinor,
+    })
+    return
+  }
+
+  const cardId = result.giftCardId ?? event.orderRef
 
   // Record EVERY inbound activation outcome so a provider callback that arrives
   // but doesn't activate (amount_mismatch, not_found, duplicate, …) is visible
   // in the card's audit log instead of silently doing nothing. Invaluable for
   // diagnosing "paid at the provider but the card never went active".
-  if (result.code !== 'activated') {
+  if (result.code !== 'activated' && cardId) {
     await store.appendAudit({
       actorId: null,
       actorRole: 'system',

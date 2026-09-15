@@ -74,6 +74,9 @@ export class MockPaymentProvider implements PaymentProvider {
       status: (parsed.status as VerifiedPaymentEvent['status']) ?? 'paid',
       amountMinor: Number(parsed.amountMinor ?? 0),
       currency: (parsed.currency as VerifiedPaymentEvent['currency']) ?? 'ILS',
+      // Carried through so the mock can exercise the order_ref-less fallback
+      // matching that the real Grow callback forces on us (gotcha #8d).
+      customerEmail: parsed.customerEmail ? String(parsed.customerEmail) : undefined,
       raw: parsed,
     }
   }

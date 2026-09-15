@@ -55,7 +55,9 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
 - `app/` — `(public)` landing + `/gift-cards` funnel, `/gift/[token]` recipient, `/employee`,
   `/admin`, `/api` (webhooks/payment, cron/deliver, health).
-- `supabase/migrations/000{1,2,3}.sql` + `seed.sql` + `setup.sql` (all-in-one).
+- `supabase/migrations/000{1..5}.sql` + `seed.sql` + `setup.sql` (all-in-one; a TRUE concatenation
+  of every migration + seed — edit a migration and re-emit, never hand-edit a section of setup.sql).
+  `diagnose-delivery.sql` answers "they paid and never got the card" (gotcha #16).
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 
@@ -63,7 +65,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 74 unit + integration tests (money, concurrency, idempotency)
+npm test               # 86 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -165,10 +167,10 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
    webhook.site and capturing the real payload.
    (d) **Grow's Payment-Links webhook payload:** amount is `paymentSum` (NOT `sum`), payer is
    `payerEmail`, id is `transactionCode`/`asmachta`, and it **omits our order_ref/custom field**. So
-   `verifyWebhook` reads `paymentSum`/`payerEmail`, and `processVerifiedPaymentEvent` resolves the
-   card by order_ref → else by the newest pending card matching **payer email + exact amount**
-   (`findPendingCardIdByEmailAndAmount`). Idempotency stays on the provider event id; unmatched
-   callbacks log `payment.webhook_unmatched`. `adminMarkPaid` remains the manual backup.
+   `verifyWebhook` reads `paymentSum`/`payerEmail` and the card is matched back by payer email +
+   exact amount — **inside the activation transaction**, see gotcha #17. Idempotency stays on the
+   provider event id; unmatched callbacks are recorded (not dropped) and reported.
+   `adminMarkPaid` remains the manual backup.
 9. **Wix DNS limits dictate the email provider.** Wix **cannot** create subdomain MX records and
    **locks nameservers** on Wix-registered domains (can't move DNS to Cloudflare). Resend REQUIRES a
    `send` subdomain MX → impossible on Wix. **SendGrid** authenticates via **CNAME** (Sender
@@ -228,6 +230,27 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     visibility (no SendGrid Event Webhook wired up), so a corporate Microsoft 365 / Google Workspace
     tenant that quarantines a first-time sender with a PDF attachment looks identical to success
     here. Check SendGrid → Activity for the address next.
+
+17. **Matching a payment to its card must happen INSIDE the activation transaction.** Because Grow
+    omits our order_ref (#8d), the card is found by payer email + amount. That matching used to run
+    in the app as a separate lookup before `activateFromPayment`, which lost cards three ways — each
+    one ending as "they paid and the recipient got nothing": (a) **not atomic** — two callbacks
+    arriving together both resolved to the same newest pending card, one activated it and the other
+    card stayed unpaid forever (exactly the company-buys-several-cards case); (b) **buyer email
+    only** — a card paid by an office manager or bought for a colleague matched nothing; (c)
+    **`ilike` with a raw address** — `_` and `%` are LIKE wildcards and `_` is legal in an email, so
+    `yoav_cohen@x.com` could activate a DIFFERENT buyer's card. Fixed in
+    **`supabase/migrations/0005_payment_matching.sql`**: `activate_gift_card_from_payment` now takes
+    `p_match_email` + `p_match_window` and resolves the card itself with `FOR UPDATE SKIP LOCKED` —
+    case-insensitive **equality** (never LIKE), buyer **OR** recipient address, exact amount, within
+    `PAYMENT_MATCH_WINDOW_DAYS` (30, `lib/data/store.ts`) so a stale draft can't absorb today's
+    payment. It returns `out_gift_card_id`, and `unmatched` when nothing fits — that event is still
+    written (`payment_events.gift_card_id` NULL) + audited + `reportError`'d, never dropped.
+    MemoryStore mirrors this under a single `__payment_match__` lock, nested inside the per-card
+    lock that still guards the mutation. **Run 0005 on the live DB.** Never reintroduce a resolve
+    step in `service.ts`. Tests: `tests/integration/payment-matching.test.ts`; the SQL (including
+    two genuinely concurrent sessions activating two different cards) was verified against a real
+    Postgres.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

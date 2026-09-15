@@ -46,19 +46,44 @@ export interface RedeemResult {
 
 export interface ActivateFromPaymentInput {
   eventId: string // provider event id (idempotency)
-  orderRef: string // gift card id
+  orderRef: string // gift card id; '' when the provider callback omits it
   providerPaymentId: string
   provider: string
   amountMinor: Minor
   currency: Currency
   rawEvent: Record<string, unknown>
+  /**
+   * Fallback identification, used ONLY when `orderRef` is empty or unknown —
+   * which is the normal case for Grow's Payment-Links callback (it does not
+   * echo our custom field; gotcha #8d).
+   *
+   * The store resolves the card from this and activates it in ONE atomic
+   * operation. Never resolve it in a separate call first: the gap between a
+   * lookup and the activation is where two callbacks arriving together both
+   * pick the same pending card, one activates it, and the other card stays
+   * unpaid forever with nothing reporting it.
+   */
+  match?: {
+    /** The payer's address at the provider. Matched case-insensitively against
+     *  the buyer AND the recipient address — a card bought for a colleague, or
+     *  paid by an office manager, carries an address we never saw in checkout. */
+    email: string | null
+  }
 }
 
 export interface ActivateResult {
-  code: 'activated' | 'already_processed' | 'amount_mismatch' | 'not_found' | 'not_activatable'
+  /** `unmatched` = the payment is real but belongs to no card we can identify.
+   *  Money was taken; a human has to place it (admin "סימון כשולם והפעלה"). */
+  code: 'activated' | 'already_processed' | 'amount_mismatch' | 'not_found' | 'not_activatable' | 'unmatched'
   giftCard?: GiftCard
+  /** Which card the payment was resolved to (absent when `unmatched`). */
+  giftCardId?: string
   message?: string
 }
+
+/** How far back the email+amount fallback will look for a pending card. An
+ *  older abandoned draft must never absorb today's payment. */
+export const PAYMENT_MATCH_WINDOW_DAYS = 30
 
 export interface CreateGiftCardInput {
   code: string
@@ -159,7 +184,6 @@ export interface GiftCardStore {
   /** Newest pre-activation card matching a buyer email + exact amount — used to
    *  reconcile a provider callback that omits the order reference (Grow Payment
    *  Links). Returns the card id, or null when there's no unambiguous match. */
-  findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null>
   getGiftCardByToken(token: string): Promise<GiftCard | null>
   getGiftCardByCode(code: string): Promise<GiftCard | null>
   listGiftCards(filter: GiftCardFilter): Promise<{ items: GiftCard[]; total: number }>

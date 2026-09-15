@@ -2,9 +2,11 @@
 -- diagnose-delivery.sql — "they paid and never got the card": which step broke?
 --
 -- HOW TO USE: put the addresses in the emails array below (buyer OR recipient —
--- both are matched) and run the whole file in the Supabase SQL Editor. It is
--- READ-ONLY. One row per gift card, with a verdict column that names the exact
--- failure and the fix.
+-- both are matched) and run PART 1 in the Supabase SQL Editor. It is READ-ONLY.
+-- One row per gift card, with a verdict column that names the exact failure and
+-- the fix. PART 2 at the bottom lists payments that matched NO card at all —
+-- run it too (the editor only shows the LAST statement's result, so highlight
+-- one part at a time).
 --
 -- NO ROWS AT ALL for an address  =>  the purchase never reached us: the card was
 -- never created. The money (if any) was taken at Grow with no order behind it —
@@ -104,3 +106,28 @@ SELECT
 FROM matched m
 LEFT JOIN last_job j ON j.gift_card_id = m.id
 ORDER BY m.created_at DESC;
+
+-- =============================================================================
+-- PART 2 — payments that matched NO gift card (highlight and run separately).
+--
+-- A callback that cannot be tied to an order is the worst case: the customer
+-- was charged and no card exists to deliver. Each row is real money to place by
+-- hand — find the order (by payer address + amount + time) and use /admin →
+-- "סימון כשולם והפעלה" on it, or issue a card manually.
+--
+-- Empty result = every callback we received was matched to a card. Good.
+-- =============================================================================
+SELECT
+  pe.created_at,
+  pe.provider,
+  pe.event_id,
+  round(pe.amount_minor::numeric / 100, 2) AS amount_ils,
+  pe.raw ->> 'payerEmail'                  AS payer_email,
+  pe.raw ->> 'transactionCode'             AS grow_transaction,
+  a.reason                                 AS why
+FROM payment_events pe
+LEFT JOIN audit_logs a
+  ON a.entity_type = 'payment_event' AND a.entity_id = pe.event_id
+WHERE pe.gift_card_id IS NULL
+ORDER BY pe.created_at DESC
+LIMIT 100;
