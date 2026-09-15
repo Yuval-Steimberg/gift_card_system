@@ -203,8 +203,9 @@ export interface GiftCardStore {
   // delivery
   createDeliveryJob(giftCardId: string, channel: 'email' | 'sms' | 'whatsapp', scheduledFor: string | null): Promise<DeliveryJob>
   getDeliveryJobs(giftCardId: string): Promise<DeliveryJob[]>
-  /** Count of distinct gift cards that have at least one failed delivery job
-   *  (one aggregate query — avoids an N+1 over every card on the dashboard). */
+  /** Count of distinct gift cards whose recipient email did NOT go out: a
+   *  failed delivery job, or one abandoned in 'processing' for longer than
+   *  STALE_CLAIM_MS (one aggregate query — no N+1 over every card). */
   countCardsWithFailedDelivery(): Promise<number>
   claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]>
   markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void>
@@ -223,3 +224,20 @@ export interface GiftCardStore {
   addNote(giftCardId: string, body: string, authorId: string): Promise<void>
   getNotes(giftCardId: string): Promise<{ id: string; body: string; authorId: string; createdAt: string }[]>
 }
+
+/**
+ * How long a delivery job may sit in 'processing' before the worker that
+ * claimed it is treated as dead and the job is retried.
+ *
+ * A job goes 'processing' the moment it is claimed and only reaches its final
+ * status after the email provider call returns. If the process is killed in
+ * between (a Vercel function timeout while building the PDF / calling SendGrid,
+ * a deploy, a crash), nothing ever moves that row again: the card is paid and
+ * active, but its email never goes out and nothing reports an error. 15 minutes
+ * is far longer than any serverless invocation can run, so a job still
+ * 'processing' after that was definitely abandoned.
+ *
+ * Keep this in sync with the same interval in `claim_due_delivery_jobs`
+ * (supabase/migrations/0004_delivery_recovery.sql).
+ */
+export const STALE_CLAIM_MS = 15 * 60 * 1000

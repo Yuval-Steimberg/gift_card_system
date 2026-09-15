@@ -13,6 +13,7 @@ import type {
 } from '@/lib/gift-cards/types'
 import type { Minor } from '@/lib/money'
 import { supabaseAdmin } from './supabase-client'
+import { STALE_CLAIM_MS } from './store'
 import { defaultSystemSettings } from './seed-data'
 import type {
   ActivateFromPaymentInput,
@@ -415,9 +416,21 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async countCardsWithFailedDelivery(): Promise<number> {
-    // One query: distinct gift cards with a failed delivery job.
-    const { data } = await this.db.from('delivery_jobs').select('gift_card_id').eq('status', 'failed')
-    return new Set((data ?? []).map((r) => r.gift_card_id)).size
+    // One query: distinct gift cards whose email did NOT go out. That is a
+    // 'failed' job OR a job left 'processing' past STALE_CLAIM_MS — a worker
+    // that died mid-send (Vercel timeout, deploy, crash) leaves exactly that,
+    // and it must not stay invisible in /admin just because nothing threw.
+    // Compare as epoch ms: Postgres renders timestamptz as "+00:00" while
+    // toISOString() ends in "Z", so a raw string compare is not safe.
+    const staleBefore = Date.now() - STALE_CLAIM_MS
+    const { data } = await this.db
+      .from('delivery_jobs')
+      .select('gift_card_id,status,updated_at')
+      .in('status', ['failed', 'processing'])
+    const stuck = (data ?? []).filter(
+      (r) => r.status === 'failed' || Date.parse(String(r.updated_at)) < staleBefore,
+    )
+    return new Set(stuck.map((r) => r.gift_card_id)).size
   }
 
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {
@@ -427,8 +440,27 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void> {
-    await this.db.from('delivery_jobs').update({ status, provider_message_id: providerMessageId, last_error: error }).eq('id', jobId)
-    await this.db.from('delivery_attempts').insert({ delivery_job_id: jobId, status, provider_message_id: providerMessageId, error })
+    const { data: job } = await this.db.from('delivery_jobs').select('attempts').eq('id', jobId).maybeSingle()
+    await this.db
+      .from('delivery_jobs')
+      .update({ status, provider_message_id: providerMessageId, last_error: error, updated_at: new Date().toISOString() })
+      .eq('id', jobId)
+    // attempt_number is NOT NULL with no default in 0001: omitting it made EVERY
+    // attempt insert fail, and the error was never read — so the per-attempt
+    // history (the first thing you want when a card never arrived) was always
+    // empty. Send the real number and surface a write failure instead of
+    // swallowing it.
+    const { error: attemptError } = await this.db.from('delivery_attempts').insert({
+      delivery_job_id: jobId,
+      attempt_number: job?.attempts ?? 0,
+      status,
+      provider_message_id: providerMessageId,
+      error,
+    })
+    if (attemptError) {
+      const { reportError } = await import('@/lib/logging/report')
+      await reportError(attemptError, { scope: 'markDeliveryResult', jobId, status })
+    }
   }
 
   private toTemplate(r: Record<string, any>): GiftCardTemplate {

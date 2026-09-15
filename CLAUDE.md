@@ -203,6 +203,32 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     "using the in-memory store" warning printed twice, one per bundle). `getStore()` now keeps it on
     `globalThis.__jasGiftCardStore`. Same trap applies to any future in-process cache.
 
+14. **A paid card could stay undelivered FOREVER, invisibly.** `deliverDueJobs` sets a job to
+    `processing` when it claims it and only writes the final status after the email provider call
+    returns — so if the process dies in between (a Vercel function timeout while embedding the PDF
+    font / calling SendGrid, a deploy, a crash) the row is stranded in `processing`. The old
+    `claim_due_delivery_jobs` re-claimed only `pending`/`scheduled`/`failed`, so the cron never
+    retried it, the per-purchase sweep never retried it, and /admin's "כשלי משלוח" never counted it:
+    money taken, card active, email never sent, nothing red anywhere. Fixed in
+    **`supabase/migrations/0004_delivery_recovery.sql`** — a job `processing` for >15 min
+    (`STALE_CLAIM_MS` in `lib/data/store.ts`; keep the two in sync) is re-claimed, and
+    `countCardsWithFailedDelivery()` counts it. **Run 0004 on the live DB.** Tests:
+    `tests/integration/delivery-recovery.test.ts`.
+15. **`delivery_attempts` was ALWAYS empty in production.** `attempt_number` is `NOT NULL` with no
+    default (0001), `markDeliveryResult` inserted without it, and the insert error was never read —
+    so every attempt row silently failed and the per-attempt history (the first thing you want when
+    a card never arrived) never existed. Now the store passes the real attempt number and reports a
+    write failure; 0004 also gives the column a default. **Never `await db.from(...).insert()`
+    without reading `error`.**
+16. **"They paid and never got the card" → run `supabase/diagnose-delivery.sql`.** Put the addresses
+    in the array at the top and run it in the SQL Editor (read-only). One row per card with a
+    `verdict` naming the exact broken step — NOT PAID / PAID, NOT ACTIVATED / NO DELIVERY JOB /
+    SCHEDULED / STUCK / FAILED / SENT — plus every `payment.*` audit outcome for the card. **SENT
+    means SendGrid returned 202, which is "accepted", NOT "reached the human"**: we have no bounce
+    visibility (no SendGrid Event Webhook wired up), so a corporate Microsoft 365 / Google Workspace
+    tenant that quarantines a first-time sender with a PDF attachment looks identical to success
+    here. Check SendGrid → Activity for the address next.
+
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 
 `lib/gift-cards/pdf.ts` embeds **Heebo** (`public/fonts/Heebo-Regular.ttf`, Hebrew + Latin +

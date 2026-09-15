@@ -29,6 +29,7 @@ import type {
   ReversalInput,
   SystemSettings,
 } from './store'
+import { STALE_CLAIM_MS } from './store'
 import { seedMemoryStore } from './seed-data'
 
 interface Note {
@@ -646,8 +647,15 @@ export class MemoryStore implements GiftCardStore {
   }
 
   async countCardsWithFailedDelivery(): Promise<number> {
+    const staleBefore = Date.now() - STALE_CLAIM_MS
     const failed = new Set<string>()
-    for (const j of this.deliveryJobs.values()) if (j.status === 'failed') failed.add(j.giftCardId)
+    for (const j of this.deliveryJobs.values()) {
+      // A job abandoned in 'processing' means the email never went out either —
+      // count it so /admin shows it instead of silently losing the card.
+      if (j.status === 'failed' || (j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore)) {
+        failed.add(j.giftCardId)
+      }
+    }
     return failed.size
   }
 
@@ -658,7 +666,9 @@ export class MemoryStore implements GiftCardStore {
       const ready =
         (j.status === 'pending' && (!j.scheduledFor || new Date(j.scheduledFor).getTime() <= nowMs)) ||
         (j.status === 'scheduled' && j.scheduledFor && new Date(j.scheduledFor).getTime() <= nowMs) ||
-        (j.status === 'failed' && j.attempts < 5)
+        (j.status === 'failed' && j.attempts < 5) ||
+        // Crashed worker: claimed but never finished (see STALE_CLAIM_MS).
+        (j.status === 'processing' && j.attempts < 5 && Date.parse(j.updatedAt) < nowMs - STALE_CLAIM_MS)
       if (ready) {
         j.status = 'processing'
         j.attempts += 1

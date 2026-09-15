@@ -441,6 +441,11 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
   created_at          timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_job ON delivery_attempts(delivery_job_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_jobs_stuck
+  ON delivery_jobs(updated_at) WHERE status = 'processing';
+-- The app writes the real attempt number; the default only keeps an insert that
+-- omits it from failing outright (it used to fail silently — see 0004).
+ALTER TABLE delivery_attempts ALTER COLUMN attempt_number SET DEFAULT 0;
 
 -- =============================================================================
 -- Accounting documents (receipts / tax invoices from the accounting provider)
@@ -1508,6 +1513,10 @@ BEGIN
       WHERE (d.status = 'pending'   AND (d.scheduled_for IS NULL OR d.scheduled_for <= p_now))
          OR (d.status = 'scheduled' AND d.scheduled_for <= p_now)
          OR (d.status = 'failed'    AND d.attempts < 5)
+         -- Crashed worker: claimed ('processing') but never finished. Retry it,
+         -- otherwise a paid card can sit undelivered forever (see 0004).
+         OR (d.status = 'processing' AND d.attempts < 5
+             AND d.updated_at < p_now - interval '15 minutes')
       ORDER BY d.scheduled_for NULLS FIRST, d.created_at
       FOR UPDATE SKIP LOCKED
       LIMIT p_limit
