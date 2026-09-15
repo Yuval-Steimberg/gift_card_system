@@ -29,7 +29,15 @@ import type {
   ReversalInput,
   SystemSettings,
 } from './store'
+import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
+import type { DeliveryHealthReport } from './store'
+import type { EmailProviderEvent } from '@/lib/delivery/email/events'
 import { seedMemoryStore } from './seed-data'
+
+/** Single lock guarding "which card does this payment belong to?" — the answer
+ *  is not known up front, so it cannot be a per-card lock. Mirrors the
+ *  FOR UPDATE SKIP LOCKED claim in 0005_payment_matching.sql. */
+const PAYMENT_MATCH_LOCK = '__payment_match__'
 
 interface Note {
   id: string
@@ -51,6 +59,8 @@ export class MemoryStore implements GiftCardStore {
   private reversals: RedemptionReversal[] = []
   private payments = new Map<string, Payment>() // by giftCardId
   private processedEvents = new Map<string, string>() // eventId -> giftCardId (idempotency)
+  private unmatchedPayments: DeliveryHealthReport['unmatchedPayments'] = [] // charged, no card
+  private knownProviderPaymentIds = new Set<string>() // every charge we were told about
   private processedRedemptionKeys = new Map<string, RedeemResult>() // idempotencyKey -> result
   private processedLedgerKeys = new Set<string>()
   private deliveryJobs = new Map<string, DeliveryJob>()
@@ -125,20 +135,6 @@ export class MemoryStore implements GiftCardStore {
   async getGiftCardById(id: string): Promise<GiftCard | null> {
     const c = this.cards.get(id)
     return c ? { ...c } : null
-  }
-
-  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
-    const wanted = email.trim().toLowerCase()
-    const pending: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing']
-    const match = [...this.cards.values()]
-      .filter(
-        (c) =>
-          (c.buyerEmail ?? '').trim().toLowerCase() === wanted &&
-          c.initialAmountMinor === amountMinor &&
-          pending.includes(c.status),
-      )
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
-    return match ? match.id : null
   }
 
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
@@ -233,14 +229,76 @@ export class MemoryStore implements GiftCardStore {
     })
   }
 
+  /**
+   * Resolve which card a provider callback paid for. Mirrors the SQL in
+   * 0005_payment_matching.sql: order_ref first, else the newest PENDING card
+   * with the exact amount whose buyer OR recipient address is the payer's,
+   * within the match window. Case-insensitive equality — never a LIKE pattern.
+   * Must only be called while holding PAYMENT_MATCH_LOCK.
+   */
+  private resolvePaidCardId(input: ActivateFromPaymentInput): string | null {
+    if (input.orderRef && this.cards.has(input.orderRef)) return input.orderRef
+    const email = input.match?.email?.trim().toLowerCase()
+    if (!email) return null
+    const notBefore = Date.now() - PAYMENT_MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    const pending: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing', 'failed']
+    const match = [...this.cards.values()]
+      .filter(
+        (c) =>
+          pending.includes(c.status) &&
+          c.initialAmountMinor === input.amountMinor &&
+          Date.parse(c.createdAt) > notBefore &&
+          ((c.buyerEmail ?? '').trim().toLowerCase() === email ||
+            (c.recipientEmail ?? '').trim().toLowerCase() === email),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
+    return match ? match.id : null
+  }
+
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivateResult> {
-    return this.mutex.runExclusive(input.orderRef, async () => {
+    // Resolve + activate without ever releasing a lock in between, so two
+    // callbacks arriving together cannot both claim the same pending card (the
+    // production path gets this from FOR UPDATE SKIP LOCKED inside one
+    // transaction). The resolve lock is global because the card identity is
+    // exactly what is not yet known; the per-card lock below is what actually
+    // guards the mutation against a concurrent redemption.
+    return this.mutex.runExclusive(PAYMENT_MATCH_LOCK, async () => {
       // Idempotency: a repeated verified webhook must not double-activate.
       if (this.processedEvents.has(input.eventId)) {
-        const card = this.cards.get(input.orderRef)
-        return { code: 'already_processed', giftCard: card ? { ...card } : undefined }
+        const priorId = this.processedEvents.get(input.eventId)!
+        if (!priorId) return { code: 'unmatched', message: 'no gift card matched this payment' }
+        const prior = this.cards.get(priorId)
+        return { code: 'already_processed', giftCardId: prior?.id, giftCard: prior ? { ...prior } : undefined }
       }
-      const card = this.cards.get(input.orderRef)
+      if (input.providerPaymentId) this.knownProviderPaymentIds.add(input.providerPaymentId)
+      const cardId = this.resolvePaidCardId(input)
+      if (!cardId) {
+        this.processedEvents.set(input.eventId, '')
+        this.unmatchedPayments.push({
+          provider: input.provider,
+          eventId: input.eventId,
+          amountMinor: input.amountMinor,
+          payerEmail: input.match?.email ?? null,
+          createdAt: this.now(),
+        })
+        await this.appendAudit({
+          actorId: null,
+          actorRole: 'system',
+          action: 'payment.webhook_unmatched',
+          entityType: 'payment_event',
+          entityId: input.eventId,
+          reason: `no card matched (email=${input.match?.email ?? '—'} amount=${input.amountMinor})`,
+          metadata: { provider: input.provider, eventId: input.eventId, amountMinor: input.amountMinor },
+        })
+        return { code: 'unmatched', message: 'no gift card matched this payment' }
+      }
+      return this.activateResolvedCard(cardId, input)
+    })
+  }
+
+  private async activateResolvedCard(cardId: string, input: ActivateFromPaymentInput): Promise<ActivateResult> {
+    return this.mutex.runExclusive(cardId, async () => {
+      const card = this.cards.get(cardId)
       if (!card) return { code: 'not_found' }
 
       // Reconcile the paid amount against our authoritative stored amount.
@@ -260,16 +318,16 @@ export class MemoryStore implements GiftCardStore {
           reason: 'paid amount does not match order amount',
           metadata: { expected: card.initialAmountMinor, received: input.amountMinor },
         })
-        return { code: 'amount_mismatch', message: 'paid amount does not match order' }
+        return { code: 'amount_mismatch', giftCardId: card.id, message: 'paid amount does not match order' }
       }
 
       if (card.status === 'active' || card.status === 'partially_redeemed' || card.status === 'fully_redeemed') {
         // Already active from a prior event under a different id — record + noop.
         this.processedEvents.set(input.eventId, card.id)
-        return { code: 'already_processed', giftCard: { ...card } }
+        return { code: 'already_processed', giftCardId: card.id, giftCard: { ...card } }
       }
       if (!canTransition(card.status, 'active') && (card.status as string) !== 'paid') {
-        return { code: 'not_activatable', message: `cannot activate from ${card.status}` }
+        return { code: 'not_activatable', giftCardId: card.id, message: `cannot activate from ${card.status}` }
       }
 
       // Mark event processed BEFORE mutation (idempotency barrier within the lock).
@@ -303,7 +361,7 @@ export class MemoryStore implements GiftCardStore {
         reason: 'verified payment',
         metadata: { provider: input.provider, providerPaymentId: input.providerPaymentId },
       })
-      return { code: 'activated', giftCard: { ...card } }
+      return { code: 'activated', giftCardId: card.id, giftCard: { ...card } }
     })
   }
 
@@ -646,8 +704,19 @@ export class MemoryStore implements GiftCardStore {
   }
 
   async countCardsWithFailedDelivery(): Promise<number> {
+    const staleBefore = Date.now() - STALE_CLAIM_MS
     const failed = new Set<string>()
-    for (const j of this.deliveryJobs.values()) if (j.status === 'failed') failed.add(j.giftCardId)
+    for (const j of this.deliveryJobs.values()) {
+      // A job abandoned in 'processing' means the email never went out either —
+      // count it so /admin shows it instead of silently losing the card.
+      if (
+        j.status === 'failed' ||
+        j.status === 'cancelled' || // the provider rejected it — a human must act
+        (j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore)
+      ) {
+        failed.add(j.giftCardId)
+      }
+    }
     return failed.size
   }
 
@@ -658,7 +727,9 @@ export class MemoryStore implements GiftCardStore {
       const ready =
         (j.status === 'pending' && (!j.scheduledFor || new Date(j.scheduledFor).getTime() <= nowMs)) ||
         (j.status === 'scheduled' && j.scheduledFor && new Date(j.scheduledFor).getTime() <= nowMs) ||
-        (j.status === 'failed' && j.attempts < 5)
+        (j.status === 'failed' && j.attempts < 5) ||
+        // Crashed worker: claimed but never finished (see STALE_CLAIM_MS).
+        (j.status === 'processing' && j.attempts < 5 && Date.parse(j.updatedAt) < nowMs - STALE_CLAIM_MS)
       if (ready) {
         j.status = 'processing'
         j.attempts += 1
@@ -682,6 +753,110 @@ export class MemoryStore implements GiftCardStore {
     job.providerMessageId = providerMessageId
     job.lastError = error
     job.updatedAt = this.now()
+  }
+
+  async applyEmailProviderEvents(
+    provider: string,
+    events: EmailProviderEvent[],
+  ): Promise<{ applied: number; unmatched: number }> {
+    let applied = 0
+    let unmatched = 0
+    for (const ev of events) {
+      if (ev.outcome === 'ignored' || ev.outcome === 'deferred') continue
+      const job =
+        (ev.jobId ? this.deliveryJobs.get(ev.jobId) : undefined) ??
+        (ev.messageId
+          ? [...this.deliveryJobs.values()].find((j) => j.providerMessageId === ev.messageId)
+          : undefined)
+      if (!job) {
+        unmatched++
+        continue
+      }
+      if (ev.outcome === 'delivered') {
+        // A rejection is the actionable state; never let a late 'delivered'
+        // overwrite it.
+        if (job.status === 'cancelled') continue
+        job.status = 'delivered'
+        job.lastError = null
+      } else {
+        // Permanently refused. 'cancelled' (not 'failed') so the retry sweep
+        // leaves it alone — re-sending to an address that hard-bounced only
+        // burns sender reputation. A human has to act.
+        job.status = 'cancelled'
+        job.lastError = `${ev.event}: ${ev.reason ?? 'rejected by the receiving server'}`
+      }
+      job.updatedAt = this.now()
+      applied++
+      await this.appendAudit({
+        actorId: null,
+        actorRole: 'system',
+        action: ev.outcome === 'delivered' ? 'delivery.provider_delivered' : 'delivery.provider_rejected',
+        entityType: 'gift_card',
+        entityId: job.giftCardId,
+        reason: job.lastError,
+        metadata: { provider, event: ev.event, email: ev.email, occurredAt: ev.occurredAt },
+      })
+    }
+    return { applied, unmatched }
+  }
+
+  async getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport> {
+    const since = Date.parse(sinceIso)
+    const staleBefore = Date.now() - STALE_CLAIM_MS
+    const report: DeliveryHealthReport = { unmatchedPayments: [], paidNotActivated: [], undelivered: [] }
+
+    report.unmatchedPayments = this.unmatchedPayments.filter((p) => Date.parse(p.createdAt) >= since)
+
+    const preActivation: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing', 'failed']
+    const paidCardIds = new Set([...this.processedEvents.values()].filter(Boolean))
+    for (const card of this.cards.values()) {
+      if (Date.parse(card.createdAt) < since) continue
+      if (preActivation.includes(card.status)) {
+        if (!paidCardIds.has(card.id)) continue // never paid — nothing owed
+        report.paidNotActivated.push({
+          id: card.id,
+          code: card.code,
+          buyerEmail: card.buyerEmail,
+          recipientEmail: card.recipientEmail,
+          amountMinor: card.initialAmountMinor,
+          createdAt: card.createdAt,
+        })
+        continue
+      }
+      if (card.status !== 'active' && card.status !== 'partially_redeemed' && card.status !== 'fully_redeemed') continue
+      // Active card: did its email actually go out?
+      const jobs = [...this.deliveryJobs.values()].filter((j) => j.giftCardId === card.id)
+      if (jobs.some((j) => j.status === 'delivered' || j.status === 'sent')) continue
+      // A future-dated scheduled card is not late.
+      if (jobs.some((j) => j.status === 'scheduled' && j.scheduledFor && Date.parse(j.scheduledFor) > Date.now())) continue
+      const worst =
+        jobs.find((j) => j.status === 'cancelled' || j.status === 'failed') ??
+        jobs.find((j) => j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore) ??
+        jobs[0]
+      if (jobs.length > 0 && !worst) continue
+      report.undelivered.push({
+        id: card.id,
+        code: card.code,
+        recipientEmail: card.recipientEmail,
+        amountMinor: card.initialAmountMinor,
+        issuedAt: card.issuedAt,
+        deliveryStatus: worst?.status ?? 'none',
+        lastError: worst?.lastError ?? null,
+      })
+    }
+    return report
+  }
+
+  async findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>> {
+    const wanted = new Set(providerPaymentIds)
+    const known = new Set<string>()
+    for (const p of this.payments.values()) {
+      if (p.provider === provider && p.providerPaymentId && wanted.has(p.providerPaymentId)) {
+        known.add(p.providerPaymentId)
+      }
+    }
+    for (const id of this.knownProviderPaymentIds) if (wanted.has(id)) known.add(id)
+    return known
   }
 
   // -------------------------------------------------------- templates/settings

@@ -46,6 +46,10 @@ const rawServerSchema = z.object({
   GROW_API_KEY: z.string().optional(),
   GROW_API_SECRET: z.string().optional(),
   GROW_PAGE_CODE: z.string().optional(),
+  // Override for Grow's transaction-listing path, used ONLY by the daily
+  // reconciliation sweep. The default is a best guess — confirm it with
+  // `npm run verify:grow` against the real account (see grow.ts).
+  GROW_TRANSACTIONS_PATH: z.string().optional(),
   // Optional Make.com webhook (Grow-via-Make), same as the JAS website. When
   // set, checkout goes through the Make scenario; otherwise the direct Grow API.
   MAKE_WEBHOOK_URL: z.string().optional(),
@@ -56,6 +60,10 @@ const rawServerSchema = z.object({
   // SendGrid authenticates the sending domain via CNAME records (no MX needed),
   // so it works on DNS hosts that block subdomain MX (e.g. Wix).
   SENDGRID_API_KEY: z.string().optional(),
+  // Base64 public key from SendGrid → Settings → Mail Settings → Signed Event
+  // Webhook. When set, /api/webhooks/email verifies every event's ECDSA
+  // signature (a forged bounce would otherwise mark a real card undelivered).
+  SENDGRID_WEBHOOK_PUBLIC_KEY: z.string().optional(),
 
   RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).catch('mock'),
   GREENINVOICE_API_URL: z.string().optional(),

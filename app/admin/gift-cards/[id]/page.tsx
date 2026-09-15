@@ -31,6 +31,7 @@ export default async function CardDetailPage({ params }: { params: { id: string 
 
   const perms: ActionPerms = {
     resend: hasPermission(user.role, 'giftcard:resend'),
+    editRecipient: hasPermission(user.role, 'giftcard:edit_recipient'),
     suspend: hasPermission(user.role, 'giftcard:suspend'),
     cancel: hasPermission(user.role, 'giftcard:cancel'),
     refund: hasPermission(user.role, 'giftcard:refund'),
@@ -81,7 +82,12 @@ export default async function CardDetailPage({ params }: { params: { id: string 
           <CardTitle>פעולות</CardTitle>
         </CardHeader>
         <CardContent>
-          <CardActions id={card.id} status={card.status} perms={perms} />
+          <CardActions
+            id={card.id}
+            status={card.status}
+            perms={perms}
+            recipient={{ name: card.recipientName, email: card.recipientEmail, phone: card.recipientPhone }}
+          />
         </CardContent>
       </Card>
 

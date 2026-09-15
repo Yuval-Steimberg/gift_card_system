@@ -13,6 +13,7 @@ import type {
   StoreLocation,
 } from '@/lib/gift-cards/types'
 import type { Currency, Minor } from '@/lib/money'
+import type { EmailProviderEvent } from '@/lib/delivery/email/events'
 
 /** Result codes returned by the atomic redemption operation. */
 export type RedeemOutcomeCode =
@@ -46,19 +47,75 @@ export interface RedeemResult {
 
 export interface ActivateFromPaymentInput {
   eventId: string // provider event id (idempotency)
-  orderRef: string // gift card id
+  orderRef: string // gift card id; '' when the provider callback omits it
   providerPaymentId: string
   provider: string
   amountMinor: Minor
   currency: Currency
   rawEvent: Record<string, unknown>
+  /**
+   * Fallback identification, used ONLY when `orderRef` is empty or unknown —
+   * which is the normal case for Grow's Payment-Links callback (it does not
+   * echo our custom field; gotcha #8d).
+   *
+   * The store resolves the card from this and activates it in ONE atomic
+   * operation. Never resolve it in a separate call first: the gap between a
+   * lookup and the activation is where two callbacks arriving together both
+   * pick the same pending card, one activates it, and the other card stays
+   * unpaid forever with nothing reporting it.
+   */
+  match?: {
+    /** The payer's address at the provider. Matched case-insensitively against
+     *  the buyer AND the recipient address — a card bought for a colleague, or
+     *  paid by an office manager, carries an address we never saw in checkout. */
+    email: string | null
+  }
 }
 
 export interface ActivateResult {
-  code: 'activated' | 'already_processed' | 'amount_mismatch' | 'not_found' | 'not_activatable'
+  /** `unmatched` = the payment is real but belongs to no card we can identify.
+   *  Money was taken; a human has to place it (admin "סימון כשולם והפעלה"). */
+  code: 'activated' | 'already_processed' | 'amount_mismatch' | 'not_found' | 'not_activatable' | 'unmatched'
   giftCard?: GiftCard
+  /** Which card the payment was resolved to (absent when `unmatched`). */
+  giftCardId?: string
   message?: string
 }
+
+/** One row of "something took money or was promised, and did not arrive." */
+export interface DeliveryHealthReport {
+  /** Provider callbacks that matched no card: charged, nothing issued. */
+  unmatchedPayments: {
+    provider: string
+    eventId: string
+    amountMinor: Minor
+    payerEmail: string | null
+    createdAt: string
+  }[]
+  /** Cards with a payment callback on file that never reached `active`. */
+  paidNotActivated: {
+    id: string
+    code: string
+    buyerEmail: string
+    recipientEmail: string
+    amountMinor: Minor
+    createdAt: string
+  }[]
+  /** Active cards whose recipient email did not go out (or bounced). */
+  undelivered: {
+    id: string
+    code: string
+    recipientEmail: string
+    amountMinor: Minor
+    issuedAt: string | null
+    deliveryStatus: DeliveryStatus | 'none'
+    lastError: string | null
+  }[]
+}
+
+/** How far back the email+amount fallback will look for a pending card. An
+ *  older abandoned draft must never absorb today's payment. */
+export const PAYMENT_MATCH_WINDOW_DAYS = 30
 
 export interface CreateGiftCardInput {
   code: string
@@ -159,7 +216,6 @@ export interface GiftCardStore {
   /** Newest pre-activation card matching a buyer email + exact amount — used to
    *  reconcile a provider callback that omits the order reference (Grow Payment
    *  Links). Returns the card id, or null when there's no unambiguous match. */
-  findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null>
   getGiftCardByToken(token: string): Promise<GiftCard | null>
   getGiftCardByCode(code: string): Promise<GiftCard | null>
   listGiftCards(filter: GiftCardFilter): Promise<{ items: GiftCard[]; total: number }>
@@ -203,11 +259,29 @@ export interface GiftCardStore {
   // delivery
   createDeliveryJob(giftCardId: string, channel: 'email' | 'sms' | 'whatsapp', scheduledFor: string | null): Promise<DeliveryJob>
   getDeliveryJobs(giftCardId: string): Promise<DeliveryJob[]>
-  /** Count of distinct gift cards that have at least one failed delivery job
-   *  (one aggregate query — avoids an N+1 over every card on the dashboard). */
+  /** Count of distinct gift cards whose recipient email did NOT go out: a
+   *  failed delivery job, or one abandoned in 'processing' for longer than
+   *  STALE_CLAIM_MS (one aggregate query — no N+1 over every card). */
   countCardsWithFailedDelivery(): Promise<number>
   claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]>
   markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void>
+  /**
+   * Apply what the EMAIL provider later reported about messages we already
+   * handed over (SendGrid Event Webhook). A 202 from the send API only means
+   * "accepted"; delivery, bounce and block are reported here, minutes to hours
+   * later, and are the only way we ever learn that a card did not arrive.
+   */
+  applyEmailProviderEvents(provider: string, events: EmailProviderEvent[]): Promise<{ applied: number; unmatched: number }>
+  /** Everything that was paid for and did not arrive, for the reconciliation
+   *  sweep. One call — never loop per card. */
+  getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport>
+  /**
+   * Of these provider charge ids, which have we actually recorded? Used to
+   * reconcile the provider's own transaction list against ours: an id the
+   * provider charged and we do not know about is money taken with no order
+   * behind it — the one failure our own tables can never reveal.
+   */
+  findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>>
 
   // templates + settings + locations
   listTemplates(includeInactive?: boolean): Promise<GiftCardTemplate[]>
@@ -223,3 +297,20 @@ export interface GiftCardStore {
   addNote(giftCardId: string, body: string, authorId: string): Promise<void>
   getNotes(giftCardId: string): Promise<{ id: string; body: string; authorId: string; createdAt: string }[]>
 }
+
+/**
+ * How long a delivery job may sit in 'processing' before the worker that
+ * claimed it is treated as dead and the job is retried.
+ *
+ * A job goes 'processing' the moment it is claimed and only reaches its final
+ * status after the email provider call returns. If the process is killed in
+ * between (a Vercel function timeout while building the PDF / calling SendGrid,
+ * a deploy, a crash), nothing ever moves that row again: the card is paid and
+ * active, but its email never goes out and nothing reports an error. 15 minutes
+ * is far longer than any serverless invocation can run, so a job still
+ * 'processing' after that was definitely abandoned.
+ *
+ * Keep this in sync with the same interval in `claim_due_delivery_jobs`
+ * (supabase/migrations/0004_delivery_recovery.sql).
+ */
+export const STALE_CLAIM_MS = 15 * 60 * 1000

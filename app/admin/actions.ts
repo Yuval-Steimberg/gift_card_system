@@ -13,6 +13,8 @@ import {
   suspendCard,
 } from '@/lib/gift-cards/admin-service'
 import { parseMajorToMinor } from '@/lib/money'
+import { checkEmail } from '@/lib/validation/email'
+import { isFullName, normalizeIsraeliPhone } from '@/lib/validation/purchase'
 
 type ActionResult = { ok: boolean; message?: string }
 
@@ -127,19 +129,73 @@ export async function adminResend(id: string): Promise<ActionResult> {
   return res
 }
 
+/**
+ * Change who a card is delivered to, then (optionally) resend.
+ *
+ * This is the manual repair path when a recipient address turns out to be
+ * wrong or unreachable — a corporate tenant blocking us, a typo, someone who
+ * left the company. Without it the only lever is "resend", which retries the
+ * exact address that just failed.
+ *
+ * Validated SERVER-SIDE with the same rules as checkout: the client form is a
+ * convenience, never the gate. Blank fields are ignored rather than written, so
+ * a partially filled form cannot wipe a recipient's details.
+ */
 export async function adminEditRecipient(
   id: string,
   fields: { recipientName?: string; recipientEmail?: string; recipientPhone?: string; scheduledDeliveryAt?: string | null },
   reason: string,
-): Promise<ActionResult> {
+  options: { resend?: boolean } = {},
+): Promise<ActionResult & { resent?: boolean }> {
   const user = await assertPermission('giftcard:edit_recipient')
-  try {
-    await getStore().updateGiftCardFields(id, fields, { actorId: user.id, actorRole: user.role, reason })
-    revalidate(id)
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'error' }
+  if (reason.trim().length < 3) return { ok: false, message: 'נא לפרט סיבה (נשמרת ביומן הביקורת)' }
+
+  const patch: typeof fields = {}
+
+  const name = fields.recipientName?.trim()
+  if (name) {
+    if (!isFullName(name)) return { ok: false, message: 'שם הנמען/ת חייב להיות שם מלא (שם פרטי ומשפחה)' }
+    patch.recipientName = name
   }
+
+  const email = fields.recipientEmail?.trim()
+  if (email) {
+    // Same 2 client-safe layers the checkout wizard uses (syntax + typo). The
+    // DNS layer is deliberately not run here: an admin fixing a bounced address
+    // should not be blocked by a transient lookup.
+    const check = checkEmail(email)
+    if (!check.ok) return { ok: false, message: check.error ?? 'כתובת אימייל לא תקינה' }
+    patch.recipientEmail = email
+  }
+
+  const phone = fields.recipientPhone?.trim()
+  if (phone) {
+    const normalized = normalizeIsraeliPhone(phone)
+    if (!normalized) return { ok: false, message: 'מספר טלפון נייד לא תקין' }
+    patch.recipientPhone = normalized
+  }
+
+  if (fields.scheduledDeliveryAt !== undefined) patch.scheduledDeliveryAt = fields.scheduledDeliveryAt
+  if (Object.keys(patch).length === 0) return { ok: false, message: 'לא הוזנו שינויים' }
+
+  try {
+    await getStore().updateGiftCardFields(id, patch, { actorId: user.id, actorRole: user.role, reason })
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'שגיאה בעדכון פרטי הנמען/ת' }
+  }
+
+  // Resend AFTER the update committed, so the card goes to the new address.
+  let resent = false
+  if (options.resend) {
+    const res = await resendGiftCard(id)
+    resent = res.ok
+    if (!res.ok) {
+      revalidate(id)
+      return { ok: true, resent: false, message: res.message ?? 'הפרטים עודכנו, אך השליחה נכשלה' }
+    }
+  }
+  revalidate(id)
+  return { ok: true, resent }
 }
 
 export async function adminReverseRedemption(

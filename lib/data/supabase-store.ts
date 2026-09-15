@@ -13,6 +13,9 @@ import type {
 } from '@/lib/gift-cards/types'
 import type { Minor } from '@/lib/money'
 import { supabaseAdmin } from './supabase-client'
+import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
+import type { DeliveryHealthReport } from './store'
+import type { EmailProviderEvent } from '@/lib/delivery/email/events'
 import { defaultSystemSettings } from './seed-data'
 import type {
   ActivateFromPaymentInput,
@@ -116,17 +119,6 @@ export class SupabaseStore implements GiftCardStore {
     return data ? this.toCard(data) : null
   }
 
-  async findPendingCardIdByEmailAndAmount(email: string, amountMinor: number): Promise<string | null> {
-    const { data } = await this.db
-      .from('gift_cards')
-      .select('id')
-      .ilike('buyer_email', email.trim())
-      .eq('initial_amount_minor', amountMinor)
-      .in('status', ['draft', 'awaiting_payment', 'payment_processing'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-    return data && data[0] ? String(data[0].id) : null
-  }
   async getGiftCardByToken(token: string): Promise<GiftCard | null> {
     const { data } = await this.db.from('gift_cards').select('*').eq('public_token', token).maybeSingle()
     return data ? this.toCard(data) : null
@@ -222,20 +214,30 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async activateFromPayment(input: ActivateFromPaymentInput): Promise<ActivateResult> {
+    // The RPC resolves the card (order_ref, else payer email + exact amount)
+    // and activates it in ONE transaction — see 0005_payment_matching.sql for
+    // why this must not be split into a lookup plus an activation.
     const { data, error } = await this.db.rpc('activate_gift_card_from_payment', {
-      p_gift_card_id: input.orderRef,
+      p_gift_card_id: input.orderRef || null,
       p_provider: input.provider,
       p_event_id: input.eventId,
       p_provider_payment_id: input.providerPaymentId,
       p_amount_minor: input.amountMinor,
       p_currency: input.currency,
       p_raw_event: input.rawEvent,
+      p_match_email: input.match?.email ?? null,
+      p_match_window: `${PAYMENT_MATCH_WINDOW_DAYS} days`,
     })
     if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
     const code = (row?.out_code ?? 'not_found') as ActivateResult['code']
-    const card = code === 'activated' || code === 'already_processed' ? await this.getGiftCardById(input.orderRef) : null
-    return { code, giftCard: card ?? undefined, message: row?.out_message }
+    // The RPC reports which card it resolved to; input.orderRef is usually empty.
+    const giftCardId = (row?.out_gift_card_id as string | null) ?? undefined
+    const card =
+      giftCardId && (code === 'activated' || code === 'already_processed')
+        ? await this.getGiftCardById(giftCardId)
+        : null
+    return { code, giftCardId, giftCard: card ?? undefined, message: row?.out_message }
   }
 
   async redeem(input: RedeemInput): Promise<RedeemResult> {
@@ -415,9 +417,21 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async countCardsWithFailedDelivery(): Promise<number> {
-    // One query: distinct gift cards with a failed delivery job.
-    const { data } = await this.db.from('delivery_jobs').select('gift_card_id').eq('status', 'failed')
-    return new Set((data ?? []).map((r) => r.gift_card_id)).size
+    // One query: distinct gift cards whose email did NOT go out. That is a
+    // 'failed' job OR a job left 'processing' past STALE_CLAIM_MS — a worker
+    // that died mid-send (Vercel timeout, deploy, crash) leaves exactly that,
+    // and it must not stay invisible in /admin just because nothing threw.
+    // Compare as epoch ms: Postgres renders timestamptz as "+00:00" while
+    // toISOString() ends in "Z", so a raw string compare is not safe.
+    const staleBefore = Date.now() - STALE_CLAIM_MS
+    const { data } = await this.db
+      .from('delivery_jobs')
+      .select('gift_card_id,status,updated_at')
+      .in('status', ['failed', 'processing', 'cancelled'])
+    const stuck = (data ?? []).filter(
+      (r) => r.status !== 'processing' || Date.parse(String(r.updated_at)) < staleBefore,
+    )
+    return new Set(stuck.map((r) => r.gift_card_id)).size
   }
 
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {
@@ -427,8 +441,212 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void> {
-    await this.db.from('delivery_jobs').update({ status, provider_message_id: providerMessageId, last_error: error }).eq('id', jobId)
-    await this.db.from('delivery_attempts').insert({ delivery_job_id: jobId, status, provider_message_id: providerMessageId, error })
+    const { data: job } = await this.db.from('delivery_jobs').select('attempts').eq('id', jobId).maybeSingle()
+    await this.db
+      .from('delivery_jobs')
+      .update({ status, provider_message_id: providerMessageId, last_error: error, updated_at: new Date().toISOString() })
+      .eq('id', jobId)
+    // attempt_number is NOT NULL with no default in 0001: omitting it made EVERY
+    // attempt insert fail, and the error was never read — so the per-attempt
+    // history (the first thing you want when a card never arrived) was always
+    // empty. Send the real number and surface a write failure instead of
+    // swallowing it.
+    const { error: attemptError } = await this.db.from('delivery_attempts').insert({
+      delivery_job_id: jobId,
+      attempt_number: job?.attempts ?? 0,
+      status,
+      provider_message_id: providerMessageId,
+      error,
+    })
+    if (attemptError) {
+      const { reportError } = await import('@/lib/logging/report')
+      await reportError(attemptError, { scope: 'markDeliveryResult', jobId, status })
+    }
+  }
+
+  async applyEmailProviderEvents(
+    provider: string,
+    events: EmailProviderEvent[],
+  ): Promise<{ applied: number; unmatched: number }> {
+    let applied = 0
+    let unmatched = 0
+    for (const ev of events) {
+      if (ev.outcome === 'ignored' || ev.outcome === 'deferred') continue
+
+      // custom_args carry our own job id — the reliable key. The message id is
+      // the fallback for anything sent before custom_args existed.
+      let job: Record<string, any> | null = null
+      if (ev.jobId) {
+        const { data } = await this.db.from('delivery_jobs').select('*').eq('id', ev.jobId).maybeSingle()
+        job = data ?? null
+      }
+      if (!job && ev.messageId) {
+        const { data } = await this.db
+          .from('delivery_jobs')
+          .select('*')
+          .eq('provider_message_id', ev.messageId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        job = data?.[0] ?? null
+      }
+      if (!job) {
+        unmatched++
+        continue
+      }
+
+      // A rejection is the actionable state; a late 'delivered' must not clear it.
+      if (ev.outcome === 'delivered' && job.status === 'cancelled') continue
+
+      const status: DeliveryStatus = ev.outcome === 'delivered' ? 'delivered' : 'cancelled'
+      const lastError =
+        ev.outcome === 'delivered' ? null : `${ev.event}: ${ev.reason ?? 'rejected by the receiving server'}`
+      // 'cancelled' rather than 'failed' on a rejection: claim_due_delivery_jobs
+      // retries 'failed', and re-sending to an address that hard-bounced only
+      // burns sender reputation. A human has to fix this one.
+      await this.db
+        .from('delivery_jobs')
+        .update({ status, last_error: lastError, updated_at: new Date().toISOString() })
+        .eq('id', job.id)
+      await this.db.from('delivery_attempts').insert({
+        delivery_job_id: job.id,
+        attempt_number: job.attempts ?? 0,
+        status,
+        provider_message_id: ev.messageId,
+        error: lastError,
+      })
+      await this.appendAudit({
+        actorId: null,
+        actorRole: 'system',
+        action: ev.outcome === 'delivered' ? 'delivery.provider_delivered' : 'delivery.provider_rejected',
+        entityType: 'gift_card',
+        entityId: job.gift_card_id,
+        reason: lastError,
+        metadata: { provider, event: ev.event, email: ev.email, occurredAt: ev.occurredAt },
+      })
+      applied++
+    }
+    return { applied, unmatched }
+  }
+
+  async getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport> {
+    const staleBefore = Date.now() - STALE_CLAIM_MS
+    const report: DeliveryHealthReport = { unmatchedPayments: [], paidNotActivated: [], undelivered: [] }
+
+    // 1. Callbacks that matched no card at all: charged, nothing issued.
+    const { data: orphanEvents } = await this.db
+      .from('payment_events')
+      .select('provider,event_id,amount_minor,raw,created_at')
+      .is('gift_card_id', null)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+    report.unmatchedPayments = (orphanEvents ?? []).map((e) => ({
+      provider: String(e.provider),
+      eventId: String(e.event_id),
+      amountMinor: Number(e.amount_minor ?? 0),
+      payerEmail: (e.raw as Record<string, unknown> | null)?.payerEmail
+        ? String((e.raw as Record<string, unknown>).payerEmail)
+        : null,
+      createdAt: String(e.created_at),
+    }))
+
+    // 2. Cards that took a payment callback but never went active.
+    const { data: cards } = await this.db
+      .from('gift_cards')
+      .select('id,code,status,buyer_email,recipient_email,initial_amount_minor,created_at,issued_at')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+    const all = cards ?? []
+    const preActivation = all.filter((c) =>
+      ['draft', 'awaiting_payment', 'payment_processing', 'failed'].includes(String(c.status)),
+    )
+    if (preActivation.length > 0) {
+      const { data: paidEvents } = await this.db
+        .from('payment_events')
+        .select('gift_card_id')
+        .in(
+          'gift_card_id',
+          preActivation.map((c) => c.id),
+        )
+      const paid = new Set((paidEvents ?? []).map((e) => String(e.gift_card_id)))
+      report.paidNotActivated = preActivation
+        .filter((c) => paid.has(String(c.id)))
+        .map((c) => ({
+          id: String(c.id),
+          code: String(c.code),
+          buyerEmail: String(c.buyer_email),
+          recipientEmail: String(c.recipient_email),
+          amountMinor: Number(c.initial_amount_minor),
+          createdAt: String(c.created_at),
+        }))
+    }
+
+    // 3. Active cards whose email did not land.
+    const live = all.filter((c) =>
+      ['active', 'partially_redeemed', 'fully_redeemed'].includes(String(c.status)),
+    )
+    if (live.length > 0) {
+      const { data: jobs } = await this.db
+        .from('delivery_jobs')
+        .select('gift_card_id,status,last_error,scheduled_for,updated_at,created_at')
+        .in(
+          'gift_card_id',
+          live.map((c) => c.id),
+        )
+      const byCard = new Map<string, Record<string, any>[]>()
+      for (const j of jobs ?? []) {
+        const key = String(j.gift_card_id)
+        byCard.set(key, [...(byCard.get(key) ?? []), j])
+      }
+      for (const c of live) {
+        const cardJobs = byCard.get(String(c.id)) ?? []
+        if (cardJobs.some((j) => j.status === 'delivered' || j.status === 'sent')) continue
+        // Not late if it is genuinely scheduled for the future.
+        if (
+          cardJobs.some(
+            (j) => j.status === 'scheduled' && j.scheduled_for && Date.parse(String(j.scheduled_for)) > Date.now(),
+          )
+        ) {
+          continue
+        }
+        const worst =
+          cardJobs.find((j) => j.status === 'cancelled' || j.status === 'failed') ??
+          cardJobs.find((j) => j.status === 'processing' && Date.parse(String(j.updated_at)) < staleBefore) ??
+          cardJobs[0]
+        if (cardJobs.length > 0 && !worst) continue
+        report.undelivered.push({
+          id: String(c.id),
+          code: String(c.code),
+          recipientEmail: String(c.recipient_email),
+          amountMinor: Number(c.initial_amount_minor),
+          issuedAt: c.issued_at ? String(c.issued_at) : null,
+          deliveryStatus: (worst?.status as DeliveryStatus) ?? 'none',
+          lastError: worst?.last_error ? String(worst.last_error) : null,
+        })
+      }
+    }
+    return report
+  }
+
+  async findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>> {
+    if (providerPaymentIds.length === 0) return new Set()
+    const known = new Set<string>()
+    // payment_events is the authoritative record of "a callback reached us",
+    // including callbacks that matched no card — and for Grow the event id IS
+    // the transaction code (see verifyWebhook).
+    const { data: events } = await this.db
+      .from('payment_events')
+      .select('event_id')
+      .eq('provider', provider)
+      .in('event_id', providerPaymentIds)
+    for (const e of events ?? []) known.add(String(e.event_id))
+    // payments also covers rows written by the manual admin activation path.
+    const { data: payments } = await this.db
+      .from('payments')
+      .select('provider_payment_id')
+      .eq('provider', provider)
+      .in('provider_payment_id', providerPaymentIds)
+    for (const p of payments ?? []) if (p.provider_payment_id) known.add(String(p.provider_payment_id))
+    return known
   }
 
   private toTemplate(r: Record<string, any>): GiftCardTemplate {

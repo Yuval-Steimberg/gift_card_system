@@ -48,14 +48,27 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 - `lib/payments|delivery/email|accounting/` — provider interfaces + mock + real adapters + factory.
   Email adapters: `log`, `resend` (abandoned — needs subdomain MX), **`sendgrid`** (live; CNAME auth).
 - `app/admin/actions.ts` — `adminMarkPaid` (manual "mark paid & activate" for a paid card whose
-  webhook never landed; runs the same verified-activation path). `components/admin/card-actions.tsx`
-  shows the **"סימון כשולם והפעלה"** button on pre-activation cards.
+  webhook never landed; runs the same verified-activation path) and **`adminEditRecipient`**
+  (change the recipient name/email/phone + optionally resend in one step — the repair path when an
+  address bounces or a corporate tenant blocks us; plain "resend" only retries the address that just
+  failed). Both are wired into `components/admin/card-actions.tsx` (**"סימון כשולם והפעלה"** on
+  pre-activation cards, **"עריכת פרטי נמען/ת"** for `owner`/`admin` only — `giftcard:edit_recipient`).
+  `adminEditRecipient` validates SERVER-SIDE with the same `checkEmail`/`isFullName`/
+  `normalizeIsraeliPhone` rules as checkout, ignores blank fields (a half-filled form must not wipe a
+  recipient) and requires a reason for the audit log. Tests:
+  `tests/integration/edit-recipient.test.ts`.
 - `lib/auth/` — **dual-mode auth**: Supabase Auth (`supabase-auth.ts` + root `middleware.ts`) when
   Supabase is configured; demo cookie auth (`session.ts`/`users.ts`) offline. Roles from `user_roles`.
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
 - `app/` — `(public)` landing + `/gift-cards` funnel, `/gift/[token]` recipient, `/employee`,
-  `/admin`, `/api` (webhooks/payment, cron/deliver, health).
-- `supabase/migrations/000{1,2,3}.sql` + `seed.sql` + `setup.sql` (all-in-one).
+  `/admin`, `/api` (webhooks/payment, **webhooks/email** = SendGrid delivery/bounce events,
+  cron/deliver, **cron/reconcile** = daily "paid but never arrived" sweep, health).
+- `supabase/migrations/000{1..6}.sql` + `seed.sql` + `setup.sql` (all-in-one; a TRUE concatenation
+  of every migration + seed — edit a migration and re-emit, never hand-edit a section of setup.sql).
+  `diagnose-delivery.sql` answers "they paid and never got the card" (gotcha #16).
+  **`apply-updates.sql`** = 0004+0005+0006 in one paste, for an EXISTING database (a new one runs
+  `setup.sql`, which already contains them). Idempotent; deploy the app FIRST (0005 changes a
+  function signature).
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 
@@ -63,10 +76,11 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 74 unit + integration tests (money, concurrency, idempotency)
+npm test               # 114 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
+npm run verify:grow        # probe Grow's transaction-listing endpoint (reconciliation). Needs GROW_* keys
 ```
 
 ## Current deployment state (LIVE test/demo, real payments proven)
@@ -100,7 +114,8 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
   add notes, manage employees, read audit — NOT settings/refunds/reissue/exports (those need `admin`).
 - **₪1 test mode:** `/admin → הגדרות` set **min amount = 1** (custom amounts already on) to buy a
   ₪1 card through the real Grow flow. Revert min to 50 before public launch.
-- **Cron / scheduled delivery:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit).
+- **Cron:** `vercel.json` runs `/api/cron/deliver` (09:00 UTC) + `/api/cron/reconcile` (06:00 UTC),
+  daily (Hobby limit).
   **Immediate** delivery never needs cron — it's sent inline at activation. **Scheduled** (שובר
   מתוזמן) delivery is a due-job queue flushed by that endpoint. Because Hobby cron is daily-only,
   timely scheduled delivery needs a **frequent external trigger**: the in-repo GitHub Actions
@@ -165,10 +180,10 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
    webhook.site and capturing the real payload.
    (d) **Grow's Payment-Links webhook payload:** amount is `paymentSum` (NOT `sum`), payer is
    `payerEmail`, id is `transactionCode`/`asmachta`, and it **omits our order_ref/custom field**. So
-   `verifyWebhook` reads `paymentSum`/`payerEmail`, and `processVerifiedPaymentEvent` resolves the
-   card by order_ref → else by the newest pending card matching **payer email + exact amount**
-   (`findPendingCardIdByEmailAndAmount`). Idempotency stays on the provider event id; unmatched
-   callbacks log `payment.webhook_unmatched`. `adminMarkPaid` remains the manual backup.
+   `verifyWebhook` reads `paymentSum`/`payerEmail` and the card is matched back by payer email +
+   exact amount — **inside the activation transaction**, see gotcha #17. Idempotency stays on the
+   provider event id; unmatched callbacks are recorded (not dropped) and reported.
+   `adminMarkPaid` remains the manual backup.
 9. **Wix DNS limits dictate the email provider.** Wix **cannot** create subdomain MX records and
    **locks nameservers** on Wix-registered domains (can't move DNS to Cloudflare). Resend REQUIRES a
    `send` subdomain MX → impossible on Wix. **SendGrid** authenticates via **CNAME** (Sender
@@ -202,6 +217,90 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     bought via `/api/webhooks/payment` was invisible to `/admin` and `/employee` offline (and the
     "using the in-memory store" warning printed twice, one per bundle). `getStore()` now keeps it on
     `globalThis.__jasGiftCardStore`. Same trap applies to any future in-process cache.
+
+14. **A paid card could stay undelivered FOREVER, invisibly.** `deliverDueJobs` sets a job to
+    `processing` when it claims it and only writes the final status after the email provider call
+    returns — so if the process dies in between (a Vercel function timeout while embedding the PDF
+    font / calling SendGrid, a deploy, a crash) the row is stranded in `processing`. The old
+    `claim_due_delivery_jobs` re-claimed only `pending`/`scheduled`/`failed`, so the cron never
+    retried it, the per-purchase sweep never retried it, and /admin's "כשלי משלוח" never counted it:
+    money taken, card active, email never sent, nothing red anywhere. Fixed in
+    **`supabase/migrations/0004_delivery_recovery.sql`** — a job `processing` for >15 min
+    (`STALE_CLAIM_MS` in `lib/data/store.ts`; keep the two in sync) is re-claimed, and
+    `countCardsWithFailedDelivery()` counts it. **Run 0004 on the live DB.** Tests:
+    `tests/integration/delivery-recovery.test.ts`.
+15. **`delivery_attempts` was ALWAYS empty in production.** `attempt_number` is `NOT NULL` with no
+    default (0001), `markDeliveryResult` inserted without it, and the insert error was never read —
+    so every attempt row silently failed and the per-attempt history (the first thing you want when
+    a card never arrived) never existed. Now the store passes the real attempt number and reports a
+    write failure; 0004 also gives the column a default. **Never `await db.from(...).insert()`
+    without reading `error`.**
+16. **"They paid and never got the card" → run `supabase/diagnose-delivery.sql`.** Put the addresses
+    in the array at the top and run it in the SQL Editor (read-only). One row per card with a
+    `verdict` naming the exact broken step — NOT PAID / PAID, NOT ACTIVATED / NO DELIVERY JOB /
+    SCHEDULED / STUCK / FAILED / SENT — plus every `payment.*` audit outcome for the card. **SENT
+    means SendGrid returned 202, which is "accepted", NOT "reached the human"**: we have no bounce
+    visibility (no SendGrid Event Webhook wired up), so a corporate Microsoft 365 / Google Workspace
+    tenant that quarantines a first-time sender with a PDF attachment looks identical to success
+    here. Check SendGrid → Activity for the address next.
+
+17. **Matching a payment to its card must happen INSIDE the activation transaction.** Because Grow
+    omits our order_ref (#8d), the card is found by payer email + amount. That matching used to run
+    in the app as a separate lookup before `activateFromPayment`, which lost cards three ways — each
+    one ending as "they paid and the recipient got nothing": (a) **not atomic** — two callbacks
+    arriving together both resolved to the same newest pending card, one activated it and the other
+    card stayed unpaid forever (exactly the company-buys-several-cards case); (b) **buyer email
+    only** — a card paid by an office manager or bought for a colleague matched nothing; (c)
+    **`ilike` with a raw address** — `_` and `%` are LIKE wildcards and `_` is legal in an email, so
+    `yoav_cohen@x.com` could activate a DIFFERENT buyer's card. Fixed in
+    **`supabase/migrations/0005_payment_matching.sql`**: `activate_gift_card_from_payment` now takes
+    `p_match_email` + `p_match_window` and resolves the card itself with `FOR UPDATE SKIP LOCKED` —
+    case-insensitive **equality** (never LIKE), buyer **OR** recipient address, exact amount, within
+    `PAYMENT_MATCH_WINDOW_DAYS` (30, `lib/data/store.ts`) so a stale draft can't absorb today's
+    payment. It returns `out_gift_card_id`, and `unmatched` when nothing fits — that event is still
+    written (`payment_events.gift_card_id` NULL) + audited + `reportError`'d, never dropped.
+    MemoryStore mirrors this under a single `__payment_match__` lock, nested inside the per-card
+    lock that still guards the mutation. **Run 0005 on the live DB.** Never reintroduce a resolve
+    step in `service.ts`. Tests: `tests/integration/payment-matching.test.ts`; the SQL (including
+    two genuinely concurrent sessions activating two different cards) was verified against a real
+    Postgres.
+
+18. **A 202 from SendGrid is NOT delivery — `/api/webhooks/email` is how we find out.** The send API
+    returning 202 means *accepted*; bounce, block and spam-drop happen after it and are reported
+    only by the **SendGrid Event Webhook**. Receiver: `app/api/webhooks/email/route.ts` →
+    `parseEmailEvents` (`lib/delivery/email/events.ts`, pure) → `store.applyEmailProviderEvents`.
+    Outgoing mail carries `custom_args` (`metadata` on `EmailMessage`) with our `jobId`/`giftCardId`,
+    so an event names the exact card; the fallback is `sg_message_id`'s first segment, which equals
+    the `X-Message-Id` `send()` stored. A rejection sets the job to **`cancelled`, NOT `failed`** —
+    `claim_due_delivery_jobs` retries `failed`, and re-sending to a hard bounce burns sender
+    reputation — and `countCardsWithFailedDelivery()` counts `cancelled`, so it surfaces in /admin.
+    Signature: ECDSA P-256 over `timestamp + rawBody` (`lib/security/sendgrid-signature.ts`),
+    enforced when `SENDGRID_WEBHOOK_PUBLIC_KEY` is set (a forged bounce would otherwise mark a real
+    card undelivered); the endpoint never 4xx's on an odd payload, because SendGrid disables a
+    webhook that keeps erroring. Tests: `tests/unit/email-events.test.ts`,
+    `tests/integration/delivery-telemetry.test.ts`.
+19. **The daily reconciliation sweep is the safety net — keep it working.** `/api/cron/reconcile`
+    (`lib/gift-cards/reconcile.ts`, 06:00 UTC in `vercel.json`) runs `store.getDeliveryHealth()` over
+    the last 14 days and emails `settings.businessEmail` **only when something is wrong** (a daily
+    "all clear" is an alert nobody reads). It reports four things, all of them money already taken:
+    **untracked charges** (see #20), **unmatched payments** (a callback reached us, no card matched),
+    **paid-but-not-activated**, and **active-but-undelivered** (no job, failed, provider-rejected, or
+    stuck). A future-dated scheduled card is not flagged. Individual bugs will keep happening; this is
+    what makes a human hear about them the same day instead of from the customer. If you add a new way
+    for a card to go missing, add it here.
+20. **Only the PROVIDER can tell you about a payment that never reached us — `listTransactions`.**
+    Our tables cannot reveal a charge whose callback never arrived (wrong webhook URL, a failed Make
+    scenario, our own outage): to them that customer simply never bought anything. So the sweep also
+    asks Grow what it charged and subtracts what we recorded
+    (`findKnownProviderPaymentIds`; for Grow `payment_events.event_id` IS the transaction code).
+    ⚠️ **Grow's transaction-listing endpoint is NOT verified** — this account has always run through
+    Make with no `GROW_*` API keys. The path is overridable via `GROW_TRANSACTIONS_PATH`, the
+    response is parsed tolerantly (`extractTransactionRows` returns **null**, never `[]`, on an
+    unknown shape — `[]` would read as a false all-clear), and **`npm run verify:grow` probes the
+    real account and prints the payload** so the path + field names in `toProviderTransaction` can be
+    corrected. Until credentials exist the sweep reports `providerCheckError` and `reportError`s it,
+    which is honest; it never silently skips this half. `MockPaymentProvider` implements
+    `listTransactions` (a built signed webhook = a charge) so the whole path is testable offline.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

@@ -28,6 +28,7 @@ export function getPaymentProvider(): PaymentProvider {
       pageCode: env.GROW_PAGE_CODE ?? '1',
       makeWebhookUrl: env.MAKE_WEBHOOK_URL,
       webhookSecret: env.PAYMENT_WEBHOOK_SECRET,
+      transactionsPath: env.GROW_TRANSACTIONS_PATH,
     })
   } else {
     instance = new MockPaymentProvider(env.PAYMENT_WEBHOOK_SECRET)
