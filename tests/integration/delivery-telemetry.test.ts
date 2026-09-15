@@ -92,7 +92,8 @@ describe('daily reconciliation', () => {
   it('stays silent when nothing is wrong', async () => {
     await boughtAndDelivered()
     expect(await runReconciliation()).toEqual({
-      unmatchedPayments: 0, paidNotActivated: 0, undelivered: 0, alerted: false,
+      unmatchedPayments: 0, paidNotActivated: 0, undelivered: 0,
+      untrackedCharges: 0, providerCheckError: null, alerted: false,
     })
   })
 
@@ -133,5 +134,46 @@ describe('daily reconciliation', () => {
     }))
 
     expect((await runReconciliation()).undelivered).toBe(0)
+  })
+})
+
+describe('provider-side reconciliation (the charge that never reached us)', () => {
+  it('catches a charge the provider took that we have no record of', async () => {
+    // The provider charges the customer, but the callback never arrives — a
+    // webhook pointed at the wrong URL, a Make scenario that failed, our
+    // outage. Our own tables cannot show this: to them, nobody ever bought.
+    const p = getPaymentProvider() as MockPaymentProvider
+    p.buildSignedWebhook({
+      eventId: 'evt-lost', orderRef: '', providerPaymentId: 'grow-tx-999', status: 'paid',
+      amountMinor: toMinor(250), currency: 'ILS', customerEmail: 'zahiasa@1to1landscape.com',
+    })
+    // …and we never call handlePaymentWebhook with it.
+
+    const result = await runReconciliation()
+    expect(result.untrackedCharges).toBe(1)
+    expect(result.providerCheckError).toBeNull()
+    expect(result.alerted).toBe(true)
+  })
+
+  it('does not flag a charge whose callback DID reach us', async () => {
+    await boughtAndDelivered()
+    const result = await runReconciliation()
+    expect(result.untrackedCharges).toBe(0)
+  })
+
+  it('still counts an unmatched callback as tracked — it reached us, it just found no card', async () => {
+    const p = getPaymentProvider() as MockPaymentProvider
+    const { body, signature } = p.buildSignedWebhook({
+      eventId: 'grow-tx-777', orderRef: '', providerPaymentId: 'grow-tx-777', status: 'paid',
+      amountMinor: toMinor(200), currency: 'ILS', customerEmail: 'nobody@example.com',
+    })
+    await handlePaymentWebhook(new Request('http://internal/api/webhooks/payment', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-mock-signature': signature }, body,
+    }))
+
+    const result = await runReconciliation()
+    // Reported once, as an unmatched payment — not twice.
+    expect(result.unmatchedPayments).toBe(1)
+    expect(result.untrackedCharges).toBe(0)
   })
 })

@@ -275,6 +275,13 @@ export interface GiftCardStore {
   /** Everything that was paid for and did not arrive, for the reconciliation
    *  sweep. One call — never loop per card. */
   getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport>
+  /**
+   * Of these provider charge ids, which have we actually recorded? Used to
+   * reconcile the provider's own transaction list against ours: an id the
+   * provider charged and we do not know about is money taken with no order
+   * behind it — the one failure our own tables can never reveal.
+   */
+  findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>>
 
   // templates + settings + locations
   listTemplates(includeInactive?: boolean): Promise<GiftCardTemplate[]>

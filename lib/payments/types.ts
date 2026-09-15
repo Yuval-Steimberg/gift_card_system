@@ -56,6 +56,19 @@ export interface RefundResult {
 
 export type ProviderPaymentStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'refunded'
 
+/** One charge as the PROVIDER sees it — the other side of the reconciliation.
+ *  Our own database can only show what reached us; this is what was actually
+ *  taken from customers. A charge here with no payment_event on our side is
+ *  money we never heard about, and the customer is waiting for a card. */
+export interface ProviderTransaction {
+  providerPaymentId: string
+  amountMinor: Minor
+  status: ProviderPaymentStatus
+  payerEmail: string | null
+  createdAt: string
+  raw: Record<string, unknown>
+}
+
 export class WebhookVerificationError extends Error {
   constructor(reason: string) {
     super(`Webhook verification failed: ${reason}`)
@@ -69,4 +82,12 @@ export interface PaymentProvider {
   verifyWebhook(request: Request): Promise<VerifiedPaymentEvent>
   refundPayment(input: RefundPaymentInput): Promise<RefundResult>
   getPaymentStatus(providerPaymentId: string): Promise<ProviderPaymentStatus>
+  /**
+   * List the provider's own charges in a window, for reconciliation.
+   *
+   * OPTIONAL: a provider that cannot be queried (or that has no API
+   * credentials configured) simply omits it, and the sweep reports that the
+   * provider-side check is unavailable rather than silently passing.
+   */
+  listTransactions?(input: { fromIso: string; toIso: string }): Promise<ProviderTransaction[]>
 }

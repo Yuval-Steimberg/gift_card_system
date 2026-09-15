@@ -4,6 +4,8 @@ import { serverEnv } from '@/lib/env'
 import { getEmailProvider } from '@/lib/delivery/email'
 import { formatMoney } from '@/lib/money'
 import { reportError } from '@/lib/logging/report'
+import { getPaymentProvider } from '@/lib/payments'
+import type { ProviderTransaction } from '@/lib/payments'
 import type { DeliveryHealthReport } from '@/lib/data/store'
 
 /** How far back each sweep looks. Wide enough that a problem is still caught
@@ -14,7 +16,63 @@ export interface ReconciliationResult {
   unmatchedPayments: number
   paidNotActivated: number
   undelivered: number
+  /** Charges the PAYMENT PROVIDER made that never reached us at all. */
+  untrackedCharges: number
+  /** Why the provider-side check could not run, if it could not. A sweep that
+   *  silently skips half its job is worse than one that says so. */
+  providerCheckError: string | null
   alerted: boolean
+}
+
+/** A charge the provider says it took, with nothing on our side to match it. */
+export interface UntrackedCharge {
+  providerPaymentId: string
+  amountMinor: number
+  payerEmail: string | null
+  createdAt: string
+}
+
+/**
+ * Ask the payment provider what it actually charged, and subtract what we
+ * recorded. This is the ONLY check that can catch a payment which never reached
+ * us — a webhook aimed at the wrong URL, a Make scenario that failed, an outage
+ * on our side. Our own tables cannot reveal it by construction: to them, that
+ * customer simply never bought anything.
+ */
+async function findUntrackedCharges(
+  sinceIso: string,
+): Promise<{ charges: UntrackedCharge[]; error: string | null }> {
+  const provider = getPaymentProvider()
+  if (typeof provider.listTransactions !== 'function') {
+    return { charges: [], error: `${provider.name} cannot list transactions` }
+  }
+  let transactions: ProviderTransaction[]
+  try {
+    transactions = await provider.listTransactions({ fromIso: sinceIso, toIso: new Date().toISOString() })
+  } catch (err) {
+    // Credentials missing, endpoint moved, provider down — report it. Never
+    // let a failed provider check read as "no problems found".
+    return { charges: [], error: err instanceof Error ? err.message : 'provider check failed' }
+  }
+
+  const paid = transactions.filter((t) => t.status === 'paid' && t.providerPaymentId)
+  if (paid.length === 0) return { charges: [], error: null }
+
+  const known = await getStore().findKnownProviderPaymentIds(
+    provider.name,
+    paid.map((t) => t.providerPaymentId),
+  )
+  return {
+    charges: paid
+      .filter((t) => !known.has(t.providerPaymentId))
+      .map((t) => ({
+        providerPaymentId: t.providerPaymentId,
+        amountMinor: t.amountMinor,
+        payerEmail: t.payerEmail,
+        createdAt: t.createdAt,
+      })),
+    error: null,
+  }
 }
 
 function escapeHtml(s: string): string {
@@ -35,10 +93,22 @@ function section(title: string, why: string, rows: string[]): string {
 export function renderReconciliationEmail(
   report: DeliveryHealthReport,
   baseUrl: string,
+  untracked: UntrackedCharge[] = [],
 ): { subject: string; html: string; text: string } {
-  const total = report.unmatchedPayments.length + report.paidNotActivated.length + report.undelivered.length
+  const total =
+    report.unmatchedPayments.length + report.paidNotActivated.length + report.undelivered.length + untracked.length
 
   const body = [
+    section(
+      'חיוב שלא הגיע למערכת',
+      'The payment provider charged these and we have NO record of them at all — no card, no order. ' +
+        'Check the provider dashboard, then issue a card by hand.',
+      untracked.map(
+        (c) =>
+          `${escapeHtml(c.payerEmail ?? 'unknown payer')} · ${formatMoney(c.amountMinor)} · ` +
+          `${escapeHtml(c.providerPaymentId)} · ${escapeHtml(c.createdAt.slice(0, 16).replace('T', ' '))}`,
+      ),
+    ),
     section(
       'תשלומים ללא שובר',
       'Money was charged and no gift card could be matched to it. Find the payment in Grow and issue a card by hand.',
@@ -73,6 +143,7 @@ export function renderReconciliationEmail(
 
   const text = [
     `${total} item(s) need attention.`,
+    `Charged at the provider but unknown to us: ${untracked.length}`,
     `Unmatched payments: ${report.unmatchedPayments.length}`,
     `Paid but not activated: ${report.paidNotActivated.length}`,
     `Active but undelivered: ${report.undelivered.length}`,
@@ -103,14 +174,25 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
   const store = getStore()
   const env = serverEnv()
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  const report = await store.getDeliveryHealth(since)
+  const [report, provider] = await Promise.all([store.getDeliveryHealth(since), findUntrackedCharges(since)])
 
   const counts = {
     unmatchedPayments: report.unmatchedPayments.length,
     paidNotActivated: report.paidNotActivated.length,
     undelivered: report.undelivered.length,
+    untrackedCharges: provider.charges.length,
+    providerCheckError: provider.error,
   }
-  const total = counts.unmatchedPayments + counts.paidNotActivated + counts.undelivered
+  if (provider.error) {
+    // Half the sweep did not run. That is an incident in itself: the check that
+    // catches "charged but never reached us" is exactly the one you cannot
+    // afford to lose quietly.
+    await reportError(new Error(`reconciliation provider check unavailable: ${provider.error}`), {
+      scope: 'reconcile_provider_check',
+    })
+  }
+  const total =
+    counts.unmatchedPayments + counts.paidNotActivated + counts.undelivered + counts.untrackedCharges
   if (total === 0) return { ...counts, alerted: false }
 
   await store.appendAudit({
@@ -120,7 +202,7 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
     entityType: 'system',
     entityId: 'reconcile',
     reason: `${total} item(s) need attention`,
-    metadata: counts,
+    metadata: { ...counts, providerCheckError: counts.providerCheckError },
   })
 
   const settings = await store.getSettings()
@@ -135,7 +217,7 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
     return { ...counts, alerted: false }
   }
 
-  const mail = renderReconciliationEmail(report, env.APP_BASE_URL)
+  const mail = renderReconciliationEmail(report, env.APP_BASE_URL, provider.charges)
   try {
     await getEmailProvider().send({
       to,

@@ -627,6 +627,28 @@ export class SupabaseStore implements GiftCardStore {
     return report
   }
 
+  async findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>> {
+    if (providerPaymentIds.length === 0) return new Set()
+    const known = new Set<string>()
+    // payment_events is the authoritative record of "a callback reached us",
+    // including callbacks that matched no card — and for Grow the event id IS
+    // the transaction code (see verifyWebhook).
+    const { data: events } = await this.db
+      .from('payment_events')
+      .select('event_id')
+      .eq('provider', provider)
+      .in('event_id', providerPaymentIds)
+    for (const e of events ?? []) known.add(String(e.event_id))
+    // payments also covers rows written by the manual admin activation path.
+    const { data: payments } = await this.db
+      .from('payments')
+      .select('provider_payment_id')
+      .eq('provider', provider)
+      .in('provider_payment_id', providerPaymentIds)
+    for (const p of payments ?? []) if (p.provider_payment_id) known.add(String(p.provider_payment_id))
+    return known
+  }
+
   private toTemplate(r: Record<string, any>): GiftCardTemplate {
     return {
       id: r.id,

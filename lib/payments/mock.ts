@@ -6,6 +6,7 @@ import {
   type CreateCheckoutInput,
   type PaymentProvider,
   type ProviderPaymentStatus,
+  type ProviderTransaction,
   type RefundPaymentInput,
   type RefundResult,
   type VerifiedPaymentEvent,
@@ -21,6 +22,9 @@ import {
  */
 export class MockPaymentProvider implements PaymentProvider {
   readonly name = 'mock'
+  /** Charges this provider has "taken" — the stand-in for the real provider's
+   *  transaction list, so the reconciliation sweep can be exercised offline. */
+  private readonly charges: ProviderTransaction[] = []
   constructor(private readonly webhookSecret: string) {}
 
   async createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession> {
@@ -49,8 +53,30 @@ export class MockPaymentProvider implements PaymentProvider {
     signature: string
   } {
     const raw = { ...event, provider: this.name }
+    // Building the webhook IS the charge in the mock flow (the mock checkout
+    // page posts it on approval), so record it on the provider side. Whether
+    // that POST ever reaches us is exactly what reconciliation checks.
+    if (event.status === 'paid' && event.providerPaymentId) {
+      this.charges.push({
+        providerPaymentId: event.providerPaymentId,
+        amountMinor: event.amountMinor,
+        status: 'paid',
+        payerEmail: event.customerEmail ?? null,
+        createdAt: new Date().toISOString(),
+        raw,
+      })
+    }
     const body = JSON.stringify(raw)
     return { body, signature: signBody(body, this.webhookSecret) }
+  }
+
+  async listTransactions(input: { fromIso: string; toIso: string }): Promise<ProviderTransaction[]> {
+    const from = Date.parse(input.fromIso)
+    const to = Date.parse(input.toIso)
+    return this.charges.filter((c) => {
+      const at = Date.parse(c.createdAt)
+      return at >= from && at <= to
+    })
   }
 
   async verifyWebhook(request: Request): Promise<VerifiedPaymentEvent> {

@@ -7,6 +7,7 @@ import {
   type PaymentProvider,
   type ProviderPaymentStatus,
   type RefundPaymentInput,
+  type ProviderTransaction,
   type RefundResult,
   type VerifiedPaymentEvent,
 } from './types'
@@ -20,6 +21,8 @@ export interface GrowConfig {
   makeWebhookUrl?: string
   /** Optional shared secret; if a callback includes `secret`, it must match. */
   webhookSecret?: string
+  /** Override for the transaction-listing path (see listTransactions). */
+  transactionsPath?: string
 }
 
 /**
@@ -241,6 +244,55 @@ export class GrowPaymentProvider implements PaymentProvider {
     }
   }
 
+  /**
+   * Grow-side reconciliation: every charge in a window, so the daily sweep can
+   * compare what Grow actually took against what we recorded.
+   *
+   * ⚠️ ENDPOINT + FIELD NAMES ARE NOT VERIFIED against a live Grow account —
+   * this project has never had GROW_* API credentials (everything goes through
+   * Make). The request path is therefore overridable with GROW_TRANSACTIONS_PATH
+   * and the response is parsed tolerantly across the shapes Grow's other
+   * endpoints use. Run `npm run verify:grow` against the real account to see the
+   * actual payload, then fix the path/field names here if they differ. Until
+   * that is done the sweep reports "provider check unavailable" — which is
+   * honest — rather than a false all-clear.
+   */
+  async listTransactions(input: { fromIso: string; toIso: string }): Promise<ProviderTransaction[]> {
+    if (!this.config.apiKey || !this.config.apiSecret) {
+      throw new Error('GROW_API_KEY + GROW_API_SECRET are required to reconcile against Grow')
+    }
+    const form = new URLSearchParams()
+    form.set('userId', this.config.apiKey)
+    form.set('apiKey', this.config.apiSecret)
+    // Grow's dashboard filters use DD/MM/YYYY; the aliases cost nothing and
+    // cover the variants its endpoints have used.
+    const ddmmyyyy = (iso: string) => {
+      const d = new Date(iso)
+      const p = (n: number) => String(n).padStart(2, '0')
+      return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`
+    }
+    form.set('dateFrom', ddmmyyyy(input.fromIso))
+    form.set('dateTo', ddmmyyyy(input.toIso))
+    form.set('from', input.fromIso)
+    form.set('to', input.toIso)
+
+    const path = this.config.transactionsPath || '/api/light/server/1.0/getTransactions'
+    const res = await fetch(`${this.config.apiUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    })
+    if (!res.ok) {
+      throw new Error(`Grow transactions request failed (${res.status} ${path})`)
+    }
+    const body = await res.json().catch(() => null)
+    const rows = extractTransactionRows(body)
+    if (rows === null) {
+      throw new Error(`Grow transactions response shape not recognised (${path}) — run npm run verify:grow`)
+    }
+    return rows.map((r) => toProviderTransaction(r))
+  }
+
   async getPaymentStatus(providerPaymentId: string): Promise<ProviderPaymentStatus> {
     const form = new URLSearchParams()
     form.set('userId', this.config.apiKey)
@@ -273,4 +325,55 @@ function parseBody(rawBody: string, contentType: string): Record<string, string>
   const out: Record<string, string> = {}
   for (const [k, v] of params.entries()) out[k] = v
   return out
+}
+
+/**
+ * Find the array of transaction rows in a Grow response. Grow returns
+ * `{status, data}` on some endpoints, a bare array on others, and nests the
+ * list under different keys — so look, rather than assume. Returns null (not
+ * []) when nothing array-shaped is found, so "the shape changed" is reported
+ * instead of being mistaken for "no charges", which would be a false all-clear.
+ */
+export function extractTransactionRows(body: unknown): Record<string, unknown>[] | null {
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, depth: number): Record<string, unknown>[] | null => {
+    if (depth > 4 || node == null || typeof node !== 'object' || seen.has(node)) return null
+    seen.add(node)
+    if (Array.isArray(node)) {
+      return node.every((r) => r && typeof r === 'object') ? (node as Record<string, unknown>[]) : null
+    }
+    for (const key of ['transactions', 'data', 'rows', 'items', 'result']) {
+      const found = walk((node as Record<string, unknown>)[key], depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  return walk(body, 0)
+}
+
+function pick(row: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    if (typeof v === 'number') return String(v)
+  }
+  return null
+}
+
+/** Map one Grow row onto our shape, accepting the field aliases Grow uses
+ *  across its payment-page, payment-link and API flows (see gotcha #8d). */
+export function toProviderTransaction(row: Record<string, unknown>): ProviderTransaction {
+  const major = Number(pick(row, ['paymentSum', 'sum', 'amount', 'total']) ?? 0)
+  const statusRaw = (pick(row, ['statusCode', 'status', 'transactionStatus']) ?? '').toLowerCase()
+  const refunded = statusRaw.includes('refund') || pick(row, ['refundSum']) !== null
+  const id = pick(row, ['transactionCode', 'asmachta', 'transactionId', 'id']) ?? ''
+  return {
+    providerPaymentId: id,
+    // Grow works in MAJOR units (shekels) everywhere; we store agorot.
+    amountMinor: Math.round(major * 100),
+    status: refunded ? 'refunded' : statusRaw === '1' || statusRaw === 'success' || Boolean(id) ? 'paid' : 'failed',
+    payerEmail: pick(row, ['payerEmail', 'customer_email', 'email']),
+    createdAt: pick(row, ['processDate', 'date', 'created_at', 'createdAt']) ?? new Date().toISOString(),
+    raw: row,
+  }
 }

@@ -46,6 +46,10 @@ const rawServerSchema = z.object({
   GROW_API_KEY: z.string().optional(),
   GROW_API_SECRET: z.string().optional(),
   GROW_PAGE_CODE: z.string().optional(),
+  // Override for Grow's transaction-listing path, used ONLY by the daily
+  // reconciliation sweep. The default is a best guess — confirm it with
+  // `npm run verify:grow` against the real account (see grow.ts).
+  GROW_TRANSACTIONS_PATH: z.string().optional(),
   // Optional Make.com webhook (Grow-via-Make), same as the JAS website. When
   // set, checkout goes through the Make scenario; otherwise the direct Grow API.
   MAKE_WEBHOOK_URL: z.string().optional(),

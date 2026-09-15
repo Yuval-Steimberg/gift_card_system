@@ -60,6 +60,7 @@ export class MemoryStore implements GiftCardStore {
   private payments = new Map<string, Payment>() // by giftCardId
   private processedEvents = new Map<string, string>() // eventId -> giftCardId (idempotency)
   private unmatchedPayments: DeliveryHealthReport['unmatchedPayments'] = [] // charged, no card
+  private knownProviderPaymentIds = new Set<string>() // every charge we were told about
   private processedRedemptionKeys = new Map<string, RedeemResult>() // idempotencyKey -> result
   private processedLedgerKeys = new Set<string>()
   private deliveryJobs = new Map<string, DeliveryJob>()
@@ -269,6 +270,7 @@ export class MemoryStore implements GiftCardStore {
         const prior = this.cards.get(priorId)
         return { code: 'already_processed', giftCardId: prior?.id, giftCard: prior ? { ...prior } : undefined }
       }
+      if (input.providerPaymentId) this.knownProviderPaymentIds.add(input.providerPaymentId)
       const cardId = this.resolvePaidCardId(input)
       if (!cardId) {
         this.processedEvents.set(input.eventId, '')
@@ -843,6 +845,18 @@ export class MemoryStore implements GiftCardStore {
       })
     }
     return report
+  }
+
+  async findKnownProviderPaymentIds(provider: string, providerPaymentIds: string[]): Promise<Set<string>> {
+    const wanted = new Set(providerPaymentIds)
+    const known = new Set<string>()
+    for (const p of this.payments.values()) {
+      if (p.provider === provider && p.providerPaymentId && wanted.has(p.providerPaymentId)) {
+        known.add(p.providerPaymentId)
+      }
+    }
+    for (const id of this.knownProviderPaymentIds) if (wanted.has(id)) known.add(id)
+    return known
   }
 
   // -------------------------------------------------------- templates/settings

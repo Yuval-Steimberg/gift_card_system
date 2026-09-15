@@ -59,6 +59,9 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 - `supabase/migrations/000{1..6}.sql` + `seed.sql` + `setup.sql` (all-in-one; a TRUE concatenation
   of every migration + seed — edit a migration and re-emit, never hand-edit a section of setup.sql).
   `diagnose-delivery.sql` answers "they paid and never got the card" (gotcha #16).
+  **`apply-updates.sql`** = 0004+0005+0006 in one paste, for an EXISTING database (a new one runs
+  `setup.sql`, which already contains them). Idempotent; deploy the app FIRST (0005 changes a
+  function signature).
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 
@@ -66,10 +69,11 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 104 unit + integration tests (money, concurrency, idempotency)
+npm test               # 111 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
+npm run verify:grow        # probe Grow's transaction-listing endpoint (reconciliation). Needs GROW_* keys
 ```
 
 ## Current deployment state (LIVE test/demo, real payments proven)
@@ -271,11 +275,25 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
 19. **The daily reconciliation sweep is the safety net — keep it working.** `/api/cron/reconcile`
     (`lib/gift-cards/reconcile.ts`, 06:00 UTC in `vercel.json`) runs `store.getDeliveryHealth()` over
     the last 14 days and emails `settings.businessEmail` **only when something is wrong** (a daily
-    "all clear" is an alert nobody reads). It reports three things, all of them money already taken:
-    **unmatched payments** (charged, no card), **paid-but-not-activated**, and **active-but-
-    undelivered** (no job, failed, provider-rejected, or stuck). A future-dated scheduled card is not
-    flagged. Individual bugs will keep happening; this is what makes a human hear about them the same
-    day instead of from the customer. If you add a new way for a card to go missing, add it here.
+    "all clear" is an alert nobody reads). It reports four things, all of them money already taken:
+    **untracked charges** (see #20), **unmatched payments** (a callback reached us, no card matched),
+    **paid-but-not-activated**, and **active-but-undelivered** (no job, failed, provider-rejected, or
+    stuck). A future-dated scheduled card is not flagged. Individual bugs will keep happening; this is
+    what makes a human hear about them the same day instead of from the customer. If you add a new way
+    for a card to go missing, add it here.
+20. **Only the PROVIDER can tell you about a payment that never reached us — `listTransactions`.**
+    Our tables cannot reveal a charge whose callback never arrived (wrong webhook URL, a failed Make
+    scenario, our own outage): to them that customer simply never bought anything. So the sweep also
+    asks Grow what it charged and subtracts what we recorded
+    (`findKnownProviderPaymentIds`; for Grow `payment_events.event_id` IS the transaction code).
+    ⚠️ **Grow's transaction-listing endpoint is NOT verified** — this account has always run through
+    Make with no `GROW_*` API keys. The path is overridable via `GROW_TRANSACTIONS_PATH`, the
+    response is parsed tolerantly (`extractTransactionRows` returns **null**, never `[]`, on an
+    unknown shape — `[]` would read as a false all-clear), and **`npm run verify:grow` probes the
+    real account and prints the payload** so the path + field names in `toProviderTransaction` can be
+    corrected. Until credentials exist the sweep reports `providerCheckError` and `reportError`s it,
+    which is honest; it never silently skips this half. `MockPaymentProvider` implements
+    `listTransactions` (a built signed webhook = a charge) so the whole path is testable offline.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

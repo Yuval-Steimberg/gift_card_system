@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { GrowPaymentProvider } from '@/lib/payments/grow'
+import { GrowPaymentProvider, extractTransactionRows, toProviderTransaction } from '@/lib/payments/grow'
 import type { CreateCheckoutInput } from '@/lib/payments/types'
 import { toMinor } from '@/lib/money'
 
@@ -140,5 +140,45 @@ describe('GrowPaymentProvider — webhook parsing (matches reference grow-webhoo
     const req = new Request('http://x', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
     const event = await provider.verifyWebhook(req)
     expect(event.status).toBe('paid')
+  })
+})
+
+describe('Grow transaction listing (reconciliation)', () => {
+  it('finds the rows wherever Grow nests them', () => {
+    expect(extractTransactionRows([{ a: 1 }])).toEqual([{ a: 1 }])
+    expect(extractTransactionRows({ status: 1, data: [{ a: 1 }] })).toEqual([{ a: 1 }])
+    expect(extractTransactionRows({ data: { transactions: [{ a: 1 }] } })).toEqual([{ a: 1 }])
+  })
+
+  it('returns null — not [] — when the shape is unrecognised', () => {
+    // [] would read as "no charges", a false all-clear on the one check that
+    // catches money taken without an order.
+    expect(extractTransactionRows({ status: 0, message: 'error' })).toBeNull()
+    expect(extractTransactionRows(null)).toBeNull()
+    expect(extractTransactionRows('nope')).toBeNull()
+  })
+
+  it('maps a Grow row to minor units and our field names', () => {
+    const t = toProviderTransaction({
+      transactionCode: 'tx-1',
+      paymentSum: '249.90',
+      payerEmail: 'yoav@1to1landscape.com',
+      statusCode: '1',
+      processDate: '2026-09-14T10:00:00Z',
+    })
+    expect(t).toMatchObject({
+      providerPaymentId: 'tx-1',
+      amountMinor: 24990, // agorot, never floats
+      payerEmail: 'yoav@1to1landscape.com',
+      status: 'paid',
+    })
+  })
+
+  it('accepts the older field aliases and flags a refund', () => {
+    expect(toProviderTransaction({ asmachta: 'tx-2', sum: 100, refundSum: 100 })).toMatchObject({
+      providerPaymentId: 'tx-2',
+      amountMinor: 10000,
+      status: 'refunded',
+    })
   })
 })
