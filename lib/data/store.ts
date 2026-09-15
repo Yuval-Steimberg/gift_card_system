@@ -13,6 +13,7 @@ import type {
   StoreLocation,
 } from '@/lib/gift-cards/types'
 import type { Currency, Minor } from '@/lib/money'
+import type { EmailProviderEvent } from '@/lib/delivery/email/events'
 
 /** Result codes returned by the atomic redemption operation. */
 export type RedeemOutcomeCode =
@@ -79,6 +80,37 @@ export interface ActivateResult {
   /** Which card the payment was resolved to (absent when `unmatched`). */
   giftCardId?: string
   message?: string
+}
+
+/** One row of "something took money or was promised, and did not arrive." */
+export interface DeliveryHealthReport {
+  /** Provider callbacks that matched no card: charged, nothing issued. */
+  unmatchedPayments: {
+    provider: string
+    eventId: string
+    amountMinor: Minor
+    payerEmail: string | null
+    createdAt: string
+  }[]
+  /** Cards with a payment callback on file that never reached `active`. */
+  paidNotActivated: {
+    id: string
+    code: string
+    buyerEmail: string
+    recipientEmail: string
+    amountMinor: Minor
+    createdAt: string
+  }[]
+  /** Active cards whose recipient email did not go out (or bounced). */
+  undelivered: {
+    id: string
+    code: string
+    recipientEmail: string
+    amountMinor: Minor
+    issuedAt: string | null
+    deliveryStatus: DeliveryStatus | 'none'
+    lastError: string | null
+  }[]
 }
 
 /** How far back the email+amount fallback will look for a pending card. An
@@ -233,6 +265,16 @@ export interface GiftCardStore {
   countCardsWithFailedDelivery(): Promise<number>
   claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]>
   markDeliveryResult(jobId: string, status: DeliveryStatus, providerMessageId: string | null, error: string | null): Promise<void>
+  /**
+   * Apply what the EMAIL provider later reported about messages we already
+   * handed over (SendGrid Event Webhook). A 202 from the send API only means
+   * "accepted"; delivery, bounce and block are reported here, minutes to hours
+   * later, and are the only way we ever learn that a card did not arrive.
+   */
+  applyEmailProviderEvents(provider: string, events: EmailProviderEvent[]): Promise<{ applied: number; unmatched: number }>
+  /** Everything that was paid for and did not arrive, for the reconciliation
+   *  sweep. One call — never loop per card. */
+  getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport>
 
   // templates + settings + locations
   listTemplates(includeInactive?: boolean): Promise<GiftCardTemplate[]>

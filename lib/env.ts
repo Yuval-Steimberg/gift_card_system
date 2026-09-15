@@ -56,6 +56,10 @@ const rawServerSchema = z.object({
   // SendGrid authenticates the sending domain via CNAME records (no MX needed),
   // so it works on DNS hosts that block subdomain MX (e.g. Wix).
   SENDGRID_API_KEY: z.string().optional(),
+  // Base64 public key from SendGrid → Settings → Mail Settings → Signed Event
+  // Webhook. When set, /api/webhooks/email verifies every event's ECDSA
+  // signature (a forged bounce would otherwise mark a real card undelivered).
+  SENDGRID_WEBHOOK_PUBLIC_KEY: z.string().optional(),
 
   RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).catch('mock'),
   GREENINVOICE_API_URL: z.string().optional(),

@@ -30,6 +30,8 @@ import type {
   SystemSettings,
 } from './store'
 import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
+import type { DeliveryHealthReport } from './store'
+import type { EmailProviderEvent } from '@/lib/delivery/email/events'
 import { seedMemoryStore } from './seed-data'
 
 /** Single lock guarding "which card does this payment belong to?" — the answer
@@ -57,6 +59,7 @@ export class MemoryStore implements GiftCardStore {
   private reversals: RedemptionReversal[] = []
   private payments = new Map<string, Payment>() // by giftCardId
   private processedEvents = new Map<string, string>() // eventId -> giftCardId (idempotency)
+  private unmatchedPayments: DeliveryHealthReport['unmatchedPayments'] = [] // charged, no card
   private processedRedemptionKeys = new Map<string, RedeemResult>() // idempotencyKey -> result
   private processedLedgerKeys = new Set<string>()
   private deliveryJobs = new Map<string, DeliveryJob>()
@@ -269,6 +272,13 @@ export class MemoryStore implements GiftCardStore {
       const cardId = this.resolvePaidCardId(input)
       if (!cardId) {
         this.processedEvents.set(input.eventId, '')
+        this.unmatchedPayments.push({
+          provider: input.provider,
+          eventId: input.eventId,
+          amountMinor: input.amountMinor,
+          payerEmail: input.match?.email ?? null,
+          createdAt: this.now(),
+        })
         await this.appendAudit({
           actorId: null,
           actorRole: 'system',
@@ -697,7 +707,11 @@ export class MemoryStore implements GiftCardStore {
     for (const j of this.deliveryJobs.values()) {
       // A job abandoned in 'processing' means the email never went out either —
       // count it so /admin shows it instead of silently losing the card.
-      if (j.status === 'failed' || (j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore)) {
+      if (
+        j.status === 'failed' ||
+        j.status === 'cancelled' || // the provider rejected it — a human must act
+        (j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore)
+      ) {
         failed.add(j.giftCardId)
       }
     }
@@ -737,6 +751,98 @@ export class MemoryStore implements GiftCardStore {
     job.providerMessageId = providerMessageId
     job.lastError = error
     job.updatedAt = this.now()
+  }
+
+  async applyEmailProviderEvents(
+    provider: string,
+    events: EmailProviderEvent[],
+  ): Promise<{ applied: number; unmatched: number }> {
+    let applied = 0
+    let unmatched = 0
+    for (const ev of events) {
+      if (ev.outcome === 'ignored' || ev.outcome === 'deferred') continue
+      const job =
+        (ev.jobId ? this.deliveryJobs.get(ev.jobId) : undefined) ??
+        (ev.messageId
+          ? [...this.deliveryJobs.values()].find((j) => j.providerMessageId === ev.messageId)
+          : undefined)
+      if (!job) {
+        unmatched++
+        continue
+      }
+      if (ev.outcome === 'delivered') {
+        // A rejection is the actionable state; never let a late 'delivered'
+        // overwrite it.
+        if (job.status === 'cancelled') continue
+        job.status = 'delivered'
+        job.lastError = null
+      } else {
+        // Permanently refused. 'cancelled' (not 'failed') so the retry sweep
+        // leaves it alone — re-sending to an address that hard-bounced only
+        // burns sender reputation. A human has to act.
+        job.status = 'cancelled'
+        job.lastError = `${ev.event}: ${ev.reason ?? 'rejected by the receiving server'}`
+      }
+      job.updatedAt = this.now()
+      applied++
+      await this.appendAudit({
+        actorId: null,
+        actorRole: 'system',
+        action: ev.outcome === 'delivered' ? 'delivery.provider_delivered' : 'delivery.provider_rejected',
+        entityType: 'gift_card',
+        entityId: job.giftCardId,
+        reason: job.lastError,
+        metadata: { provider, event: ev.event, email: ev.email, occurredAt: ev.occurredAt },
+      })
+    }
+    return { applied, unmatched }
+  }
+
+  async getDeliveryHealth(sinceIso: string): Promise<DeliveryHealthReport> {
+    const since = Date.parse(sinceIso)
+    const staleBefore = Date.now() - STALE_CLAIM_MS
+    const report: DeliveryHealthReport = { unmatchedPayments: [], paidNotActivated: [], undelivered: [] }
+
+    report.unmatchedPayments = this.unmatchedPayments.filter((p) => Date.parse(p.createdAt) >= since)
+
+    const preActivation: GiftCard['status'][] = ['draft', 'awaiting_payment', 'payment_processing', 'failed']
+    const paidCardIds = new Set([...this.processedEvents.values()].filter(Boolean))
+    for (const card of this.cards.values()) {
+      if (Date.parse(card.createdAt) < since) continue
+      if (preActivation.includes(card.status)) {
+        if (!paidCardIds.has(card.id)) continue // never paid — nothing owed
+        report.paidNotActivated.push({
+          id: card.id,
+          code: card.code,
+          buyerEmail: card.buyerEmail,
+          recipientEmail: card.recipientEmail,
+          amountMinor: card.initialAmountMinor,
+          createdAt: card.createdAt,
+        })
+        continue
+      }
+      if (card.status !== 'active' && card.status !== 'partially_redeemed' && card.status !== 'fully_redeemed') continue
+      // Active card: did its email actually go out?
+      const jobs = [...this.deliveryJobs.values()].filter((j) => j.giftCardId === card.id)
+      if (jobs.some((j) => j.status === 'delivered' || j.status === 'sent')) continue
+      // A future-dated scheduled card is not late.
+      if (jobs.some((j) => j.status === 'scheduled' && j.scheduledFor && Date.parse(j.scheduledFor) > Date.now())) continue
+      const worst =
+        jobs.find((j) => j.status === 'cancelled' || j.status === 'failed') ??
+        jobs.find((j) => j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore) ??
+        jobs[0]
+      if (jobs.length > 0 && !worst) continue
+      report.undelivered.push({
+        id: card.id,
+        code: card.code,
+        recipientEmail: card.recipientEmail,
+        amountMinor: card.initialAmountMinor,
+        issuedAt: card.issuedAt,
+        deliveryStatus: worst?.status ?? 'none',
+        lastError: worst?.lastError ?? null,
+      })
+    }
+    return report
   }
 
   // -------------------------------------------------------- templates/settings

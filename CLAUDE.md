@@ -54,8 +54,9 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   Supabase is configured; demo cookie auth (`session.ts`/`users.ts`) offline. Roles from `user_roles`.
 - `lib/env.ts` — env parsing. **Only parses; must NOT throw for provider config** (see gotcha #3).
 - `app/` — `(public)` landing + `/gift-cards` funnel, `/gift/[token]` recipient, `/employee`,
-  `/admin`, `/api` (webhooks/payment, cron/deliver, health).
-- `supabase/migrations/000{1..5}.sql` + `seed.sql` + `setup.sql` (all-in-one; a TRUE concatenation
+  `/admin`, `/api` (webhooks/payment, **webhooks/email** = SendGrid delivery/bounce events,
+  cron/deliver, **cron/reconcile** = daily "paid but never arrived" sweep, health).
+- `supabase/migrations/000{1..6}.sql` + `seed.sql` + `setup.sql` (all-in-one; a TRUE concatenation
   of every migration + seed — edit a migration and re-emit, never hand-edit a section of setup.sql).
   `diagnose-delivery.sql` answers "they paid and never got the card" (gotcha #16).
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
@@ -65,7 +66,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 86 unit + integration tests (money, concurrency, idempotency)
+npm test               # 104 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -102,7 +103,8 @@ npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY
   add notes, manage employees, read audit — NOT settings/refunds/reissue/exports (those need `admin`).
 - **₪1 test mode:** `/admin → הגדרות` set **min amount = 1** (custom amounts already on) to buy a
   ₪1 card through the real Grow flow. Revert min to 50 before public launch.
-- **Cron / scheduled delivery:** `vercel.json` runs `/api/cron/deliver` daily (Hobby limit).
+- **Cron:** `vercel.json` runs `/api/cron/deliver` (09:00 UTC) + `/api/cron/reconcile` (06:00 UTC),
+  daily (Hobby limit).
   **Immediate** delivery never needs cron — it's sent inline at activation. **Scheduled** (שובר
   מתוזמן) delivery is a due-job queue flushed by that endpoint. Because Hobby cron is daily-only,
   timely scheduled delivery needs a **frequent external trigger**: the in-repo GitHub Actions
@@ -251,6 +253,29 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     step in `service.ts`. Tests: `tests/integration/payment-matching.test.ts`; the SQL (including
     two genuinely concurrent sessions activating two different cards) was verified against a real
     Postgres.
+
+18. **A 202 from SendGrid is NOT delivery — `/api/webhooks/email` is how we find out.** The send API
+    returning 202 means *accepted*; bounce, block and spam-drop happen after it and are reported
+    only by the **SendGrid Event Webhook**. Receiver: `app/api/webhooks/email/route.ts` →
+    `parseEmailEvents` (`lib/delivery/email/events.ts`, pure) → `store.applyEmailProviderEvents`.
+    Outgoing mail carries `custom_args` (`metadata` on `EmailMessage`) with our `jobId`/`giftCardId`,
+    so an event names the exact card; the fallback is `sg_message_id`'s first segment, which equals
+    the `X-Message-Id` `send()` stored. A rejection sets the job to **`cancelled`, NOT `failed`** —
+    `claim_due_delivery_jobs` retries `failed`, and re-sending to a hard bounce burns sender
+    reputation — and `countCardsWithFailedDelivery()` counts `cancelled`, so it surfaces in /admin.
+    Signature: ECDSA P-256 over `timestamp + rawBody` (`lib/security/sendgrid-signature.ts`),
+    enforced when `SENDGRID_WEBHOOK_PUBLIC_KEY` is set (a forged bounce would otherwise mark a real
+    card undelivered); the endpoint never 4xx's on an odd payload, because SendGrid disables a
+    webhook that keeps erroring. Tests: `tests/unit/email-events.test.ts`,
+    `tests/integration/delivery-telemetry.test.ts`.
+19. **The daily reconciliation sweep is the safety net — keep it working.** `/api/cron/reconcile`
+    (`lib/gift-cards/reconcile.ts`, 06:00 UTC in `vercel.json`) runs `store.getDeliveryHealth()` over
+    the last 14 days and emails `settings.businessEmail` **only when something is wrong** (a daily
+    "all clear" is an alert nobody reads). It reports three things, all of them money already taken:
+    **unmatched payments** (charged, no card), **paid-but-not-activated**, and **active-but-
+    undelivered** (no job, failed, provider-rejected, or stuck). A future-dated scheduled card is not
+    flagged. Individual bugs will keep happening; this is what makes a human hear about them the same
+    day instead of from the customer. If you add a new way for a card to go missing, add it here.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

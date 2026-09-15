@@ -32,6 +32,11 @@ export class SendGridEmailProvider implements EmailProvider {
         { type: 'text/html', value: message.html },
       ],
     }
+    // Echoed back verbatim on every delivery/bounce event (see
+    // app/api/webhooks/email/route.ts), so an event can be tied to its card.
+    if (message.metadata && Object.keys(message.metadata).length > 0) {
+      body.custom_args = message.metadata
+    }
     if (message.attachments?.length) {
       body.attachments = message.attachments.map((a) => ({
         content: Buffer.from(a.content).toString('base64'),

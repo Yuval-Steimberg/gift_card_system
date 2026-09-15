@@ -280,6 +280,7 @@ async function sendBuyerConfirmation(card: GiftCard, receiptNumber: string | nul
     html: mail.html,
     text: mail.text,
     idempotencyKey: `buyer-confirm:${card.id}`,
+    metadata: { giftCardId: card.id, kind: 'buyer_confirmation' },
   })
 }
 
@@ -321,6 +322,9 @@ export async function deliverDueJobs(now: string, limit: number): Promise<{ proc
         html: mail.html,
         text: mail.text,
         idempotencyKey: `recipient:${card.id}`,
+        // Echoed back on every SendGrid delivery/bounce event so the webhook
+        // can name this exact card and job instead of guessing.
+        metadata: { jobId: job.id, giftCardId: card.id, kind: 'recipient' },
         attachments: pdf ? [{ filename: `gift-card-${card.code}.pdf`, content: pdf, contentType: 'application/pdf' }] : undefined,
       })
       await store.markDeliveryResult(job.id, 'delivered', res.providerMessageId, null)
