@@ -76,7 +76,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 114 unit + integration tests (money, concurrency, idempotency)
+npm test               # 121 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -375,6 +375,14 @@ Edit it in ONE place; both spots follow.
 - **`getCurrentUser()` is wrapped in React `cache()`** — the layout + page + actions in one request
   share ONE auth resolution instead of each re-hitting Supabase.
 - **`supabaseCurrentUser()` parallelizes** its roles + store-location lookups.
+- **Stats must follow every sale (don't regress):** `salesCards()` in `admin-service.ts` is the ONE
+  definition of "a sale" (paid statuses + the original of a reissue; never the reissue replacement,
+  never an unpaid checkout) — dashboard totals and reports' per-design table both use it.
+  `SupabaseStore.listGiftCards` pages in 1000-row requests because PostgREST silently caps a
+  response at `max_rows` (the totals would otherwise freeze at the newest 1000 cards).
+  `next.config.mjs` sets `experimental.staleTimes.dynamic = 0` so the client Router Cache never
+  shows pre-purchase numbers. Tests: `tests/integration/admin-stats.test.ts`,
+  `tests/unit/supabase-list-paging.test.ts`.
 - **No N+1 on the dashboard:** `getAdminStats` uses `store.countCardsWithFailedDelivery()` (one
   aggregate query) instead of looping `getDeliveryJobs(cardId)` per card. (Still loads all cards to
   sum totals in JS — fine for hundreds; move to a SQL aggregate if it reaches thousands.)

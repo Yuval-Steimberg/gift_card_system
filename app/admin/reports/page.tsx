@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { requireRole } from '@/lib/auth/guards'
 import { hasPermission } from '@/lib/permissions/roles'
 import { getStore } from '@/lib/data'
-import { getAdminStats } from '@/lib/gift-cards/admin-service'
+import { getAdminStats, salesCards } from '@/lib/gift-cards/admin-service'
 import { formatMoney } from '@/lib/money'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,8 +20,10 @@ export default async function ReportsPage() {
   ])
   const canExport = hasPermission(user.role, 'export:financial')
 
+  // Only cards that were actually paid for — an abandoned checkout is not a sale.
+  const sold = salesCards(all.items)
   const byTemplate = templates.map((t) => {
-    const cards = all.items.filter((c) => c.templateId === t.id)
+    const cards = sold.filter((c) => c.templateId === t.id)
     return { name: t.name, count: cards.length, valueMinor: cards.reduce((s, c) => s + c.initialAmountMinor, 0) }
   })
 

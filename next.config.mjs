@@ -2,6 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    // Next 14 keeps a visited dynamic page in the client Router Cache for 30s,
+    // so going back to /admin right after a sale showed the old totals. Always
+    // refetch: every admin number must reflect the latest purchase.
+    staleTimes: { dynamic: 0 },
+  },
   eslint: {
     // CI runs `next lint` explicitly; don't fail production builds on lint.
     ignoreDuringBuilds: true,

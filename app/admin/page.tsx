@@ -21,7 +21,7 @@ export default async function AdminOverview() {
     <div>
       <h1 className="mb-6 text-2xl">סקירה</h1>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="מכירות סה״כ" value={formatMoney(s.totalSalesMinor)} ltr hint={`היום ${s.soldToday} · שבוע ${s.soldWeek} · חודש ${s.soldMonth}`} />
+        <Stat label="מכירות סה״כ" value={formatMoney(s.totalSalesMinor)} ltr hint={`${s.soldTotal} שוברים · היום ${s.soldToday} · שבוע ${s.soldWeek} · חודש ${s.soldMonth}`} />
         <Stat label="יתרה פעילה (חוב פתוח)" value={formatMoney(s.outstandingMinor)} ltr />
         <Stat label="נפדה סה״כ" value={formatMoney(s.redeemedMinor)} ltr />
         <Stat label="שוברים פעילים" value={String(s.active)} />
