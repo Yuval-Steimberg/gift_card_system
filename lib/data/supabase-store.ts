@@ -447,12 +447,29 @@ export class SupabaseStore implements GiftCardStore {
     const staleBefore = Date.now() - STALE_CLAIM_MS
     const { data } = await this.db
       .from('delivery_jobs')
-      .select('gift_card_id,status,updated_at')
+      .select('gift_card_id,status,created_at,updated_at')
       .in('status', ['failed', 'processing', 'cancelled'])
-    const stuck = (data ?? []).filter(
-      (r) => r.status !== 'processing' || Date.parse(String(r.updated_at)) < staleBefore,
-    )
-    return new Set(stuck.map((r) => r.gift_card_id)).size
+    const failed = new Map<string, number>() // card → createdAt of its latest failed job
+    for (const r of data ?? []) {
+      if (r.status === 'processing' && Date.parse(String(r.updated_at)) >= staleBefore) continue
+      const at = Date.parse(String(r.created_at))
+      const key = String(r.gift_card_id)
+      if ((failed.get(key) ?? -Infinity) < at) failed.set(key, at)
+    }
+    if (failed.size === 0) return 0
+    // A failure a later send already fixed (a resend after an outage) is history,
+    // not a card that still needs someone — drop cards delivered after it.
+    const { data: ok } = await this.db
+      .from('delivery_jobs')
+      .select('gift_card_id,updated_at')
+      .in('status', ['delivered', 'sent'])
+      .in('gift_card_id', [...failed.keys()])
+    for (const r of ok ?? []) {
+      const key = String(r.gift_card_id)
+      const failedAt = failed.get(key)
+      if (failedAt !== undefined && Date.parse(String(r.updated_at)) >= failedAt) failed.delete(key)
+    }
+    return failed.size
   }
 
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {

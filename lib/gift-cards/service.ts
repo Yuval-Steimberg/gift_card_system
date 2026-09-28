@@ -308,6 +308,22 @@ export async function deliverDueJobs(now: string, limit: number): Promise<{ proc
         await store.markDeliveryResult(job.id, 'failed', null, 'channel not supported in MVP')
         continue
       }
+      // A retry of an OLD job (a failed attempt from before a manual resend)
+      // must not email the recipient a second time once a newer job already
+      // got the card through. A resend of an already-delivered card creates a
+      // job AFTER that delivery, so it is not caught here and still goes out.
+      const siblings = await store.getDeliveryJobs(card.id)
+      const deliveredSince = siblings.some(
+        (o) =>
+          o.id !== job.id &&
+          o.channel === job.channel &&
+          (o.status === 'delivered' || o.status === 'sent') &&
+          Date.parse(o.updatedAt) > Date.parse(job.createdAt),
+      )
+      if (deliveredSince) {
+        await store.markDeliveryResult(job.id, 'cancelled', null, 'superseded: the card was already delivered by a newer job')
+        continue
+      }
       const mail = renderRecipientEmail(card, env.APP_BASE_URL, business)
       let pdf: Uint8Array | null = null
       try {
@@ -352,6 +368,39 @@ export async function deliverDueJobs(now: string, limit: number): Promise<{ proc
     }
   }
   return { processed }
+}
+
+/** How far back "resend every failed card" looks. Wider than the daily sweep's
+ *  14 days: after a provider outage the owner wants EVERY stranded card back. */
+const RESEND_ALL_LOOKBACK_DAYS = 90
+
+/**
+ * Resend every paid card whose recipient email never went out — the recovery
+ * step after an email-provider outage (e.g. SendGrid's trial ending, which
+ * failed every send with "Maximum credits exceeded" until the plan was
+ * upgraded, and left each card's retries used up).
+ *
+ * Cards the RECEIVING server rejected (bounce/block → job `cancelled`) are NOT
+ * resent: the same address would bounce again and burn sender reputation. Those
+ * need "עריכת פרטי נמען/ת" first, so they are returned for the admin to handle.
+ */
+export async function resendAllUndelivered(): Promise<{
+  queued: number
+  delivered: number
+  rejected: { id: string; code: string; recipientEmail: string }[]
+}> {
+  const store = getStore()
+  const since = new Date(Date.now() - RESEND_ALL_LOOKBACK_DAYS * 86400000).toISOString()
+  const { undelivered } = await store.getDeliveryHealth(since)
+  const retry = undelivered.filter((c) => c.deliveryStatus !== 'cancelled')
+  const rejected = undelivered
+    .filter((c) => c.deliveryStatus === 'cancelled')
+    .map((c) => ({ id: c.id, code: c.code, recipientEmail: c.recipientEmail }))
+  for (const c of retry) await store.createDeliveryJob(c.id, 'email', null)
+  // Old failed jobs may be claimed alongside the new ones; whichever sends
+  // first wins and the other is skipped as superseded — never two emails.
+  const { processed } = retry.length > 0 ? await deliverDueJobs(new Date().toISOString(), retry.length * 2) : { processed: 0 }
+  return { queued: retry.length, delivered: processed, rejected }
 }
 
 /** Manually (re)send a card's recipient email — admin action. */

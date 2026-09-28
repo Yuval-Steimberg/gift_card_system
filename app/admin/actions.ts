@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { assertPermission } from '@/lib/auth/guards'
 import { getStore } from '@/lib/data'
-import { resendGiftCard, processVerifiedPaymentEvent } from '@/lib/gift-cards/service'
+import { resendGiftCard, resendAllUndelivered, processVerifiedPaymentEvent } from '@/lib/gift-cards/service'
 import {
   adjustBalance,
   cancelCard,
@@ -127,6 +127,41 @@ export async function adminResend(id: string): Promise<ActionResult> {
   const res = await resendGiftCard(id)
   revalidate(id)
   return res
+}
+
+/**
+ * Resend every paid card whose email never went out — one click after an
+ * email-provider outage instead of opening each card. Cards the recipient's
+ * server rejected are listed back, not resent (see resendAllUndelivered).
+ */
+export async function adminResendAllFailed(): Promise<
+  ActionResult & { queued?: number; delivered?: number; rejected?: { id: string; code: string; recipientEmail: string }[] }
+> {
+  const user = await assertPermission('giftcard:resend')
+  try {
+    const res = await resendAllUndelivered()
+    await getStore().appendAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'delivery.resend_all',
+      entityType: 'system',
+      entityId: 'delivery',
+      reason: `resent ${res.delivered}/${res.queued}`,
+      metadata: { queued: res.queued, delivered: res.delivered, rejected: res.rejected.length },
+    })
+    revalidatePath('/admin')
+    revalidatePath('/admin/gift-cards')
+    if (res.queued > 0 && res.delivered < res.queued) {
+      return {
+        ok: false,
+        ...res,
+        message: `נשלחו ${res.delivered} מתוך ${res.queued}. ספק המייל עדיין דוחה שליחה — בדקו את חשבון SendGrid.`,
+      }
+    }
+    return { ok: true, ...res }
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'שגיאה בשליחה החוזרת' }
+  }
 }
 
 /**

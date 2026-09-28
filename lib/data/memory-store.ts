@@ -705,7 +705,8 @@ export class MemoryStore implements GiftCardStore {
 
   async countCardsWithFailedDelivery(): Promise<number> {
     const staleBefore = Date.now() - STALE_CLAIM_MS
-    const failed = new Set<string>()
+    const failed = new Map<string, string>() // card → createdAt of its latest failed job
+    const delivered = new Map<string, string>() // card → updatedAt of its latest success
     for (const j of this.deliveryJobs.values()) {
       // A job abandoned in 'processing' means the email never went out either —
       // count it so /admin shows it instead of silently losing the card.
@@ -714,10 +715,19 @@ export class MemoryStore implements GiftCardStore {
         j.status === 'cancelled' || // the provider rejected it — a human must act
         (j.status === 'processing' && Date.parse(j.updatedAt) < staleBefore)
       ) {
-        failed.add(j.giftCardId)
+        if ((failed.get(j.giftCardId) ?? '') < j.createdAt) failed.set(j.giftCardId, j.createdAt)
+      } else if (j.status === 'delivered' || j.status === 'sent') {
+        if ((delivered.get(j.giftCardId) ?? '') < j.updatedAt) delivered.set(j.giftCardId, j.updatedAt)
       }
     }
-    return failed.size
+    // A failure a later send already fixed (a resend after an outage) is history,
+    // not a card that still needs someone.
+    let n = 0
+    for (const [card, failedAt] of failed) {
+      const okAt = delivered.get(card)
+      if (!okAt || Date.parse(okAt) < Date.parse(failedAt)) n++
+    }
+    return n
   }
 
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {

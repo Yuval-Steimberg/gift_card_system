@@ -93,7 +93,7 @@ describe('daily reconciliation', () => {
     await boughtAndDelivered()
     expect(await runReconciliation()).toEqual({
       unmatchedPayments: 0, paidNotActivated: 0, undelivered: 0,
-      untrackedCharges: 0, providerCheckError: null, alerted: false,
+      untrackedCharges: 0, providerCheckError: null, alerted: false, needsAttention: false,
     })
   })
 

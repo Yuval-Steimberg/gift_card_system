@@ -27,7 +27,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
     }
   }
-  const result = await runReconciliation()
+  // `?notify=0` = check only, no email — used by the GitHub Actions watchdog,
+  // which alerts through GitHub instead (independent of our email provider).
+  const notify = new URL(request.url).searchParams.get('notify') !== '0'
+  const result = await runReconciliation({ notify })
   return NextResponse.json({ ok: true, ...result })
 }
 
