@@ -1,0 +1,59 @@
+# Independent alarm for "money taken, customer got nothing".
+#
+# WHY THIS EXISTS: the daily reconciliation sweep (/api/cron/reconcile, Vercel
+# cron 06:00 UTC) emails the owner through OUR email provider. When that provider
+# is the thing that broke — SendGrid's free trial ended on 2026-09-23 and every
+# send failed with "Maximum credits exceeded" — the alert about undelivered cards
+# fails too, and nobody hears anything. This job asks the same endpoint in
+# check-only mode (`?notify=0`, no email) and FAILS when something needs a human.
+# GitHub then emails you about the failed run itself — no SendGrid involved.
+#
+# SETUP (one-time):
+#   1. Repository secrets (Settings → Secrets and variables → Actions):
+#        RECONCILE_CRON_URL  e.g. https://gift.justasecond.co.il/api/cron/reconcile
+#                            (optional if DELIVERY_CRON_URL is set — derived from it)
+#        CRON_SECRET         the SAME value set in the Vercel project env (if any)
+#   2. Your GitHub notification settings (github.com/settings/notifications →
+#      "Actions") must have email ON for failed workflows.
+# Scheduled workflows only run on the repository's DEFAULT branch.
+name: reconcile-watchdog
+
+on:
+  schedule:
+    - cron: '30 6 * * *' # daily, 30 min after the Vercel sweep (09:30 Israel summer time)
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the app whether anything paid for is stuck
+        env:
+          RECONCILE_CRON_URL: ${{ secrets.RECONCILE_CRON_URL }}
+          DELIVERY_CRON_URL: ${{ secrets.DELIVERY_CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          url="$RECONCILE_CRON_URL"
+          if [ -z "$url" ] && [ -n "$DELIVERY_CRON_URL" ]; then
+            url="${DELIVERY_CRON_URL%/api/cron/deliver}/api/cron/reconcile"
+          fi
+          if [ -z "$url" ]; then
+            # A safety net that is silently off is the failure this job exists
+            # to prevent — so an unconfigured watchdog fails, loudly.
+            echo "::error::Set the RECONCILE_CRON_URL (or DELIVERY_CRON_URL) repository secret to enable this alarm."
+            exit 1
+          fi
+          code=$(curl -sS -o body.json -w '%{http_code}' "${url}?notify=0" \
+            -H "Authorization: Bearer ${CRON_SECRET}")
+          echo "HTTP $code"
+          cat body.json; echo
+          if [ "$code" -ge 400 ]; then
+            echo "::error::Reconciliation endpoint returned HTTP $code"
+            exit 1
+          fi
+          if jq -e '.needsAttention == true' body.json > /dev/null; then
+            summary=$(jq -r '"undelivered=\(.undelivered) paidNotActivated=\(.paidNotActivated) unmatchedPayments=\(.unmatchedPayments) untrackedCharges=\(.untrackedCharges)"' body.json)
+            echo "::error::Paid gift cards need attention ($summary). Open /admin — if every card failed with the same email error, check the SendGrid account first."
+            exit 1
+          fi
+          echo "All clear."

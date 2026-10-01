@@ -13,6 +13,8 @@ interface Actor {
 
 /** Aggregate metrics for the dashboard overview. */
 export interface AdminStats {
+  /** Every card ever paid for (all time), refunds excluded. */
+  soldTotal: number
   soldToday: number
   soldWeek: number
   soldMonth: number
@@ -28,12 +30,32 @@ export interface AdminStats {
   failedDeliveries: number
 }
 
+/** Paid-for cards that still hold (or held) value. Pre-payment drafts,
+ *  failed/cancelled checkouts, refunds and voided reissues are NOT here. */
+const PAID_STATUSES: GiftCardStatus[] = ['active', 'partially_redeemed', 'fully_redeemed', 'expired', 'suspended']
+
+/**
+ * Which cards are SALES — money actually taken from a customer.
+ *
+ * A reissue voids the old card (status `reissued`) and creates a new one with
+ * the same initial amount and a fresh `issuedAt`. Counting the new card would
+ * report a replacement as a brand-new sale today (and drop the original sale
+ * date); so the sale stays on the ORIGINAL card and the replacement is skipped.
+ */
+export function salesCards(cards: GiftCard[]): GiftCard[] {
+  const replacements = new Set(cards.map((c) => c.supersededByCardId).filter((id): id is string => !!id))
+  return cards.filter(
+    (c) => !replacements.has(c.id) && (PAID_STATUSES.includes(c.status) || c.status === 'reissued'),
+  )
+}
+
 export async function getAdminStats(): Promise<AdminStats> {
   const store = getStore()
   const { items } = await store.listGiftCards({ limit: 100000 })
   const now = Date.now()
   const day = 86400000
   const stats: AdminStats = {
+    soldTotal: 0,
     soldToday: 0,
     soldWeek: 0,
     soldMonth: 0,
@@ -48,19 +70,24 @@ export async function getAdminStats(): Promise<AdminStats> {
     expiringSoon: 0,
     failedDeliveries: 0,
   }
-  const paidStatuses: GiftCardStatus[] = ['active', 'partially_redeemed', 'fully_redeemed', 'expired', 'suspended']
-  for (const c of items) {
+  for (const c of salesCards(items)) {
+    stats.soldTotal++
+    stats.totalSalesMinor += c.initialAmountMinor
     const issued = c.issuedAt ? new Date(c.issuedAt).getTime() : null
-    if (paidStatuses.includes(c.status)) {
-      stats.totalSalesMinor += c.initialAmountMinor
+    if (issued) {
+      if (now - issued < day) stats.soldToday++
+      if (now - issued < 7 * day) stats.soldWeek++
+      if (now - issued < 30 * day) stats.soldMonth++
+    }
+  }
+  for (const c of items) {
+    // Value lives on the live card: a replacement carries the original initial
+    // amount and the remaining balance, so initial − balance is what was spent;
+    // the voided `reissued` card's balance was transferred, not redeemed.
+    if (PAID_STATUSES.includes(c.status)) {
       stats.redeemedMinor += c.initialAmountMinor - c.balanceMinor
       if (c.status === 'active' || c.status === 'partially_redeemed' || c.status === 'suspended') {
         stats.outstandingMinor += c.balanceMinor
-      }
-      if (issued) {
-        if (now - issued < day) stats.soldToday++
-        if (now - issued < 7 * day) stats.soldWeek++
-        if (now - issued < 30 * day) stats.soldMonth++
       }
     }
     if (c.status === 'active') stats.active++

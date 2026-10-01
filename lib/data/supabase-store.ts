@@ -31,6 +31,9 @@ import type {
   SystemSettings,
 } from './store'
 
+/** Rows per request — at or under PostgREST's `max_rows` (1000 on Supabase). */
+const SUPABASE_PAGE_SIZE = 1000
+
 /**
  * Production persistence backed by Supabase/Postgres. Atomicity + idempotency
  * for money movement are delegated to the SQL functions created by the
@@ -129,19 +132,37 @@ export class SupabaseStore implements GiftCardStore {
   }
 
   async listGiftCards(filter: GiftCardFilter): Promise<{ items: GiftCard[]; total: number }> {
-    let q = this.db.from('gift_cards').select('*', { count: 'exact' })
-    if (filter.status) q = q.eq('status', filter.status)
-    if (filter.templateId) q = q.eq('template_id', filter.templateId)
-    if (filter.query) {
-      const term = `%${filter.query}%`
-      q = q.or(
-        `code.ilike.${term},recipient_name.ilike.${term},buyer_name.ilike.${term},buyer_email.ilike.${term},recipient_email.ilike.${term}`,
-      )
+    const build = () => {
+      let q = this.db.from('gift_cards').select('*', { count: 'exact' })
+      if (filter.status) q = q.eq('status', filter.status)
+      if (filter.templateId) q = q.eq('template_id', filter.templateId)
+      if (filter.query) {
+        const term = `%${filter.query}%`
+        q = q.or(
+          `code.ilike.${term},recipient_name.ilike.${term},buyer_name.ilike.${term},buyer_email.ilike.${term},recipient_email.ilike.${term}`,
+        )
+      }
+      // `id` breaks created_at ties so consecutive pages never skip or repeat a row.
+      return q.order('created_at', { ascending: false }).order('id', { ascending: false })
     }
-    q = q.order('created_at', { ascending: false }).range(filter.offset ?? 0, (filter.offset ?? 0) + (filter.limit ?? 50) - 1)
-    const { data, count, error } = await q
-    if (error) throw error
-    return { items: (data ?? []).map((r) => this.toCard(r)), total: count ?? 0 }
+    // PostgREST silently caps every response at `max_rows` (1000 on Supabase).
+    // The dashboard, reports and CSV export ask for ALL cards, so a single
+    // request would freeze every total at the newest 1000 cards — page instead.
+    const start = filter.offset ?? 0
+    const want = filter.limit ?? 50
+    const items: GiftCard[] = []
+    let total = 0
+    while (items.length < want) {
+      const from = start + items.length
+      const size = Math.min(SUPABASE_PAGE_SIZE, want - items.length)
+      const { data, count, error } = await build().range(from, from + size - 1)
+      if (error) throw error
+      total = count ?? 0
+      const rows = data ?? []
+      items.push(...rows.map((r) => this.toCard(r)))
+      if (rows.length === 0 || from + rows.length >= total) break
+    }
+    return { items, total }
   }
 
   async updateGiftCardFields(
@@ -426,12 +447,29 @@ export class SupabaseStore implements GiftCardStore {
     const staleBefore = Date.now() - STALE_CLAIM_MS
     const { data } = await this.db
       .from('delivery_jobs')
-      .select('gift_card_id,status,updated_at')
+      .select('gift_card_id,status,created_at,updated_at')
       .in('status', ['failed', 'processing', 'cancelled'])
-    const stuck = (data ?? []).filter(
-      (r) => r.status !== 'processing' || Date.parse(String(r.updated_at)) < staleBefore,
-    )
-    return new Set(stuck.map((r) => r.gift_card_id)).size
+    const failed = new Map<string, number>() // card → createdAt of its latest failed job
+    for (const r of data ?? []) {
+      if (r.status === 'processing' && Date.parse(String(r.updated_at)) >= staleBefore) continue
+      const at = Date.parse(String(r.created_at))
+      const key = String(r.gift_card_id)
+      if ((failed.get(key) ?? -Infinity) < at) failed.set(key, at)
+    }
+    if (failed.size === 0) return 0
+    // A failure a later send already fixed (a resend after an outage) is history,
+    // not a card that still needs someone — drop cards delivered after it.
+    const { data: ok } = await this.db
+      .from('delivery_jobs')
+      .select('gift_card_id,updated_at')
+      .in('status', ['delivered', 'sent'])
+      .in('gift_card_id', [...failed.keys()])
+    for (const r of ok ?? []) {
+      const key = String(r.gift_card_id)
+      const failedAt = failed.get(key)
+      if (failedAt !== undefined && Date.parse(String(r.updated_at)) >= failedAt) failed.delete(key)
+    }
+    return failed.size
   }
 
   async claimDueDeliveryJobs(now: string, limit: number): Promise<DeliveryJob[]> {

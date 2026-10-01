@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { getAdminStats } from '@/lib/gift-cards/admin-service'
 import { formatMoney } from '@/lib/money'
 import { Card } from '@/components/ui/card'
+import { FailedDeliveryAlert } from '@/components/admin/failed-delivery-alert'
+import { getCurrentUser } from '@/lib/auth/session'
+import { hasPermission } from '@/lib/permissions/roles'
 
 function Stat({ label, value, hint, ltr }: { label: string; value: string; hint?: string; ltr?: boolean }) {
   return (
@@ -16,12 +19,13 @@ function Stat({ label, value, hint, ltr }: { label: string; value: string; hint?
 }
 
 export default async function AdminOverview() {
-  const s = await getAdminStats()
+  const [s, user] = await Promise.all([getAdminStats(), getCurrentUser()])
   return (
     <div>
       <h1 className="mb-6 text-2xl">סקירה</h1>
+      <FailedDeliveryAlert count={s.failedDeliveries} canResend={hasPermission(user?.role, 'giftcard:resend')} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="מכירות סה״כ" value={formatMoney(s.totalSalesMinor)} ltr hint={`היום ${s.soldToday} · שבוע ${s.soldWeek} · חודש ${s.soldMonth}`} />
+        <Stat label="מכירות סה״כ" value={formatMoney(s.totalSalesMinor)} ltr hint={`${s.soldTotal} שוברים · היום ${s.soldToday} · שבוע ${s.soldWeek} · חודש ${s.soldMonth}`} />
         <Stat label="יתרה פעילה (חוב פתוח)" value={formatMoney(s.outstandingMinor)} ltr />
         <Stat label="נפדה סה״כ" value={formatMoney(s.redeemedMinor)} ltr />
         <Stat label="שוברים פעילים" value={String(s.active)} />

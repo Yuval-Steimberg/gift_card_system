@@ -76,7 +76,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 114 unit + integration tests (money, concurrency, idempotency)
+npm test               # 127 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -302,6 +302,26 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     which is honest; it never silently skips this half. `MockPaymentProvider` implements
     `listTransactions` (a built signed webhook = a charge) so the whole path is testable offline.
 
+21. **SendGrid's free trial ENDED (2026-09-23) and every email failed silently for days.** Every send
+    returned `401 Maximum credits exceeded`: cards were paid + active, nothing went out, and the daily
+    sweep's alert failed too — it is sent through the SAME provider. Nobody noticed until a customer
+    did. The fix is a paid SendGrid plan (Essentials 50K); the code now makes the next outage loud
+    and recoverable:
+    (a) **`.github/workflows/reconcile-watchdog.yml`** calls `/api/cron/reconcile?notify=0` daily
+    (check-only, no email) and FAILS when `needsAttention` — GitHub emails the owner about the
+    failed run, an alarm independent of our email provider. Needs repo secret `RECONCILE_CRON_URL`
+    (or derives it from `DELIVERY_CRON_URL`); an unconfigured watchdog fails on purpose.
+    (b) /admin shows a red **`FailedDeliveryAlert`** banner + **"שליחה חוזרת לכל השוברים שלא נמסרו"**
+    (`adminResendAllFailed` → `resendAllUndelivered`, 90-day lookback). It skips cards the
+    recipient's server REJECTED (`cancelled`, gotcha #18) and lists them for a recipient edit.
+    (c) Two bugs this exposed, both fixed: the "כשלי משלוח" count never went down after a successful
+    resend (it counted any failed job — now only failures NOT followed by a delivery), and the old
+    failed job stayed retryable after a resend, so the cron **emailed the recipient twice** —
+    `deliverDueJobs` now cancels a job as superseded when the card was delivered after that job was
+    created (a deliberate resend of a delivered card creates a newer job, so it still sends).
+    Buyer RECEIPT emails that failed in an outage are not retried by any of this.
+    Tests: `tests/integration/email-outage-recovery.test.ts`.
+
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 
 `lib/gift-cards/pdf.ts` embeds **Heebo** (`public/fonts/Heebo-Regular.ttf`, Hebrew + Latin +
@@ -375,6 +395,14 @@ Edit it in ONE place; both spots follow.
 - **`getCurrentUser()` is wrapped in React `cache()`** — the layout + page + actions in one request
   share ONE auth resolution instead of each re-hitting Supabase.
 - **`supabaseCurrentUser()` parallelizes** its roles + store-location lookups.
+- **Stats must follow every sale (don't regress):** `salesCards()` in `admin-service.ts` is the ONE
+  definition of "a sale" (paid statuses + the original of a reissue; never the reissue replacement,
+  never an unpaid checkout) — dashboard totals and reports' per-design table both use it.
+  `SupabaseStore.listGiftCards` pages in 1000-row requests because PostgREST silently caps a
+  response at `max_rows` (the totals would otherwise freeze at the newest 1000 cards).
+  `next.config.mjs` sets `experimental.staleTimes.dynamic = 0` so the client Router Cache never
+  shows pre-purchase numbers. Tests: `tests/integration/admin-stats.test.ts`,
+  `tests/unit/supabase-list-paging.test.ts`.
 - **No N+1 on the dashboard:** `getAdminStats` uses `store.countCardsWithFailedDelivery()` (one
   aggregate query) instead of looping `getDeliveryJobs(cardId)` per card. (Still loads all cards to
   sum totals in JS — fine for hundreds; move to a SQL aggregate if it reaches thousands.)
@@ -432,8 +460,9 @@ manual entry. (Regression guard: don't drop the `jsqr` dep or the canvas path �
   dedicated Grow webhook → the gift app + parsing Grow's real payload (`paymentSum`/`payerEmail`, no
   order_ref → match by email+amount, gotcha #8d). Pending: confirm one live ₪1 payment shows
   `giftcard.activated · verified payment` (not `manual_activate`). `adminMarkPaid` is the backup.
-- **Email (SendGrid)** — ✅✅ **DONE + confirmed live** (real card email received in the inbox).
-  Free plan = 100/day.
+- **Email (SendGrid)** — worked live, then the **60-day free trial ended 2026-09-23** → every send
+  fails (`Maximum credits exceeded`) until a paid plan is chosen (gotcha #21). After upgrading: resend
+  via the /admin banner.
 - **₪1 test mode** — ✅ works. Set via `/admin → הגדרות` (min amount = 1) or SQL
   `update system_settings set min_amount_minor=100 where id=1;`. **Revert to 5000 (₪50) before launch.**
 - **Green Invoice (accounting)** — ⏳ adapter implemented, still `RECEIPT_PROVIDER=mock`; sandbox-test

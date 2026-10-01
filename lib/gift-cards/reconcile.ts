@@ -22,6 +22,10 @@ export interface ReconciliationResult {
    *  silently skips half its job is worse than one that says so. */
   providerCheckError: string | null
   alerted: boolean
+  /** Something above is money already taken that needs a human. The GitHub
+   *  Actions check fails on this, so the owner hears about it from GitHub even
+   *  when OUR email provider is the thing that is down. */
+  needsAttention: boolean
 }
 
 /** A charge the provider says it took, with nothing on our side to match it. */
@@ -123,7 +127,7 @@ export function renderReconciliationEmail(
       'A payment callback arrived for these cards but they never went active. Use "סימון כשולם והפעלה" in /admin.',
       report.paidNotActivated.map(
         (c) =>
-          `<a href="${baseUrl}/admin/cards/${c.id}">${escapeHtml(c.code)}</a> · ` +
+          `<a href="${baseUrl}/admin/gift-cards/${c.id}">${escapeHtml(c.code)}</a> · ` +
           `${escapeHtml(c.recipientEmail)} · ${formatMoney(c.amountMinor)}`,
       ),
     ),
@@ -132,7 +136,7 @@ export function renderReconciliationEmail(
       'These cards are paid and active, but the recipient email did not go out (or the receiving server rejected it).',
       report.undelivered.map(
         (c) =>
-          `<a href="${baseUrl}/admin/cards/${c.id}">${escapeHtml(c.code)}</a> · ` +
+          `<a href="${baseUrl}/admin/gift-cards/${c.id}">${escapeHtml(c.code)}</a> · ` +
           `${escapeHtml(c.recipientEmail)} · ${formatMoney(c.amountMinor)} · ` +
           `${escapeHtml(c.deliveryStatus)}${c.lastError ? ` — ${escapeHtml(c.lastError)}` : ''}`,
       ),
@@ -170,7 +174,10 @@ ${body}
  * Deliberately quiet on a clean run: an alert that arrives every day is an
  * alert nobody reads.
  */
-export async function runReconciliation(): Promise<ReconciliationResult> {
+export async function runReconciliation(
+  opts: { notify?: boolean } = {},
+): Promise<ReconciliationResult> {
+  const notify = opts.notify ?? true
   const store = getStore()
   const env = serverEnv()
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
@@ -193,7 +200,10 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
   }
   const total =
     counts.unmatchedPayments + counts.paidNotActivated + counts.undelivered + counts.untrackedCharges
-  if (total === 0) return { ...counts, alerted: false }
+  if (total === 0) return { ...counts, alerted: false, needsAttention: false }
+  // A check-only run (the GitHub Actions watchdog) reports and stays silent:
+  // the daily Vercel run already sends the email and writes the audit row.
+  if (!notify) return { ...counts, alerted: false, needsAttention: true }
 
   await store.appendAudit({
     actorId: null,
@@ -214,7 +224,7 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
       scope: 'reconcile',
       ...counts,
     })
-    return { ...counts, alerted: false }
+    return { ...counts, alerted: false, needsAttention: true }
   }
 
   const mail = renderReconciliationEmail(report, env.APP_BASE_URL, provider.charges)
@@ -227,9 +237,9 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
       idempotencyKey: `reconcile:${new Date().toISOString().slice(0, 10)}`,
       metadata: { kind: 'reconciliation' },
     })
-    return { ...counts, alerted: true }
+    return { ...counts, alerted: true, needsAttention: true }
   } catch (err) {
     await reportError(err, { scope: 'reconcile_alert', ...counts })
-    return { ...counts, alerted: false }
+    return { ...counts, alerted: false, needsAttention: true }
   }
 }
