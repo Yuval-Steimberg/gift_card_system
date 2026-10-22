@@ -81,6 +81,11 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   `POST delivery/resend-undelivered`. Every write requires `actor {email, role}` + a reason and lands
   in `audit_logs` as `actorRole: 'command_center'` naming that person (`actor_id` stays NULL — the
   command center is not a profile). Tests: `tests/integration/integration-cards.test.ts`.
+  Also `GET sales?from=YYYY-MM-DD&to=YYYY-MM-DD` (`lib/integration/sales.ts`): daily cards sold / face value
+  (`salesCards()`, by Israel day of `issuedAt`) and redemptions (reversed ones reported apart) for the range
+  and the equally long period before it, max 366 days. Counts and agorot only. Tests:
+  `tests/integration/integration-sales.test.ts`. ⚠️ Tests in a shell that has `NEXT_PUBLIC_SUPABASE_URL` +
+  `SUPABASE_SERVICE_ROLE_KEY` exported hit the LIVE store and time out — `env -u` them for `npm test`.
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 

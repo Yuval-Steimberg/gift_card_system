@@ -242,6 +242,8 @@ export interface GiftCardStore {
   applyLedgerAdjustment(input: LedgerAdjustmentInput): Promise<{ ok: boolean; balanceAfterMinor?: Minor; message?: string }>
   getLedger(giftCardId: string): Promise<LedgerEntry[]>
   getRedemptions(giftCardId: string): Promise<Redemption[]>
+  /** Every redemption created in [fromIso, toIso), across all cards (analytics). */
+  listRedemptionsBetween(fromIso: string, toIso: string): Promise<Redemption[]>
 
   // lifecycle actions
   transitionStatus(
