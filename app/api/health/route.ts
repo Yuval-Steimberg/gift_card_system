@@ -18,6 +18,9 @@ export async function GET() {
     ok: false,
     // Bump this marker when deploying a fix so you can confirm the LIVE build.
     build: 'auth-decoupled-v1',
+    // Which commit/branch Vercel actually deployed (set by Vercel; null locally).
+    commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+    branch: process.env.VERCEL_GIT_COMMIT_REF ?? null,
     store: usingSupabase ? 'supabase' : 'memory',
     env: {
       NEXT_PUBLIC_SUPABASE_URL: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
@@ -39,6 +42,9 @@ export async function GET() {
       // Length of the stored staff password after trimming — a diagnostic to
       // catch wrapping quotes / stray characters (compare to what you expect).
       AUTH_DEMO_PASSWORD_LEN: (process.env.AUTH_DEMO_PASSWORD ?? '').trim().length,
+      // The JAS Command Center summary endpoint is off (404) unless this is 32+ characters.
+      // Length only, never the value: it tells "not set" from "set but too short / quoted".
+      INTEGRATION_API_KEY_LEN: (process.env.INTEGRATION_API_KEY ?? '').trim().length,
     },
   }
 
