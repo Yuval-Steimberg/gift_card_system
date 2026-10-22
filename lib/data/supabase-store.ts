@@ -362,6 +362,25 @@ export class SupabaseStore implements GiftCardStore {
     return (data ?? []).map((r) => this.toRedemption(r))
   }
 
+  async listRedemptionsBetween(fromIso: string, toIso: string): Promise<Redemption[]> {
+    // Paged for the same reason as listGiftCards: PostgREST caps a response at max_rows.
+    const out: Redemption[] = []
+    for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+      const { data, error } = await this.db
+        .from('gift_card_redemptions')
+        .select('*')
+        .gte('created_at', fromIso)
+        .lt('created_at', toIso)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, from + SUPABASE_PAGE_SIZE - 1)
+      if (error) throw error
+      const rows = data ?? []
+      out.push(...rows.map((r) => this.toRedemption(r)))
+      if (rows.length < SUPABASE_PAGE_SIZE) return out
+    }
+  }
+
   async transitionStatus(
     giftCardId: string,
     to: GiftCardStatus,

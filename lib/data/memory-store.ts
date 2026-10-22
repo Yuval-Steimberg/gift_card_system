@@ -581,6 +581,17 @@ export class MemoryStore implements GiftCardStore {
     return this.redemptions.filter((r) => r.giftCardId === giftCardId).map((r) => ({ ...r }))
   }
 
+  async listRedemptionsBetween(fromIso: string, toIso: string): Promise<Redemption[]> {
+    const from = Date.parse(fromIso)
+    const to = Date.parse(toIso)
+    return this.redemptions
+      .filter((r) => {
+        const t = Date.parse(r.createdAt)
+        return t >= from && t < to
+      })
+      .map((r) => ({ ...r }))
+  }
+
   // ---------------------------------------------------------- lifecycle actions
   async transitionStatus(
     giftCardId: string,
