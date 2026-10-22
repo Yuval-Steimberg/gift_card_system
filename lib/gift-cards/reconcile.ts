@@ -10,7 +10,7 @@ import type { DeliveryHealthReport } from '@/lib/data/store'
 
 /** How far back each sweep looks. Wide enough that a problem is still caught
  *  if a day's run is missed; the alert is deduped by being a daily digest. */
-const LOOKBACK_DAYS = 14
+export const LOOKBACK_DAYS = 14
 
 export interface ReconciliationResult {
   unmatchedPayments: number
