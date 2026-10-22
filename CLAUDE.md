@@ -81,6 +81,16 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   `POST delivery/resend-undelivered`. Every write requires `actor {email, role}` + a reason and lands
   in `audit_logs` as `actorRole: 'command_center'` naming that person (`actor_id` stays NULL — the
   command center is not a profile). Tests: `tests/integration/integration-cards.test.ts`.
+  **`POST cards/:id/lifecycle`** `{op}` = the money-moving /admin actions — suspend / reactivate / cancel /
+  refund / reissue / adjust / mark_paid — each calling the SAME function /admin calls (`admin-service.ts`,
+  `mark-paid.ts`). `adjust` requires a `requestId` (ledger idempotency key `cc:<id>`). Reissue returns the
+  new card's MASKED code only. Tests: `tests/integration/integration-lifecycle.test.ts`.
+- **Refund never claims the money went back unless the provider said so.** `refundCard` zeroes the
+  REMAINING balance (not the initial amount — what was spent in-store is not refundable), checks the
+  transition BEFORE debiting, then asks Grow to refund that same amount and returns
+  `provider: refunded | failed | not_attempted` (+ a `giftcard.provider_refund` audit row). With no
+  `GROW_*` keys (today) the provider step fails and `describeRefund` tells the operator to credit the
+  buyer in Grow by hand. Manual activations (`manual_*` payment ids) are never sent to Grow.
   Also `GET sales?from=YYYY-MM-DD&to=YYYY-MM-DD` (`lib/integration/sales.ts`): daily cards sold / face value
   (`salesCards()`, by Israel day of `issuedAt`) and redemptions (reversed ones reported apart) for the range
   and the equally long period before it, max 366 days. Counts and agorot only. Tests:

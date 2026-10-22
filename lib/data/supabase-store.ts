@@ -384,7 +384,7 @@ export class SupabaseStore implements GiftCardStore {
   async transitionStatus(
     giftCardId: string,
     to: GiftCardStatus,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; message?: string }> {
     const { data, error } = await this.db.rpc('transition_gift_card_status', {
       p_gift_card_id: giftCardId,
@@ -402,7 +402,7 @@ export class SupabaseStore implements GiftCardStore {
     giftCardId: string,
     newCode: string,
     newToken: string,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; newCard?: GiftCard; message?: string }> {
     const { data, error } = await this.db.rpc('reissue_gift_card', {
       p_gift_card_id: giftCardId,

@@ -68,7 +68,7 @@ export function CardActions({
     setMsg(null)
     start(async () => {
       const res = await fn()
-      setMsg({ ok: res.ok, text: res.ok ? successText : res.message ?? 'שגיאה' })
+      setMsg({ ok: res.ok, text: res.ok ? res.message ?? successText : res.message ?? 'שגיאה' })
       if (res.ok) {
         setOpen(null)
         setReason('')

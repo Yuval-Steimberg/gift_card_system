@@ -2,11 +2,12 @@ import 'server-only'
 import { getStore } from '@/lib/data'
 import { getPaymentProvider } from '@/lib/payments'
 import { generateGiftCardCode, generatePublicToken } from './codes'
+import { canTransition } from './status'
 import type { GiftCard, GiftCardStatus } from './types'
-import type { Minor } from '@/lib/money'
+import { formatMoney, type Minor } from '@/lib/money'
 
 interface Actor {
-  actorId: string
+  actorId: string | null
   actorRole: string
   reason: string
 }
@@ -122,39 +123,82 @@ export async function cancelCard(id: string, actor: Actor) {
   return getStore().transitionStatus(id, 'cancelled', actor)
 }
 
-/** Refund: reverse remaining value via provider + ledger + status. */
-export async function refundCard(id: string, actor: Actor): Promise<{ ok: boolean; message?: string }> {
+export type ProviderRefundOutcome = 'refunded' | 'failed' | 'not_attempted'
+
+/**
+ * Refund: zero the remaining value in the ledger, mark the card refunded, and
+ * ask the payment provider to return the money.
+ *
+ * The provider step is best-effort and its outcome is RETURNED, never assumed:
+ * this account runs Grow through Make with no GROW_* API keys, so the provider
+ * call fails today and the money has to be returned in Grow by hand. A caller
+ * must tell the person which one happened.
+ *
+ * Only the REMAINING balance goes back to the buyer — what was already spent in
+ * the store is not refundable — which is also exactly what the ledger debits.
+ */
+export async function refundCard(
+  id: string,
+  actor: Actor,
+): Promise<{ ok: boolean; message?: string; provider?: ProviderRefundOutcome; refundedMinor?: Minor }> {
   const store = getStore()
   const card = await store.getGiftCardById(id)
   if (!card) return { ok: false, message: 'not found' }
+  // Check first: a debit followed by an illegal transition would leave a
+  // zeroed card in its old status.
+  if (!canTransition(card.status, 'refunded')) return { ok: false, message: `illegal transition ${card.status} -> refunded` }
+  const remaining = card.balanceMinor
   const payment = await store.getPaymentByGiftCard(id)
   // Debit remaining balance to zero in the ledger.
-  if (card.balanceMinor > 0) {
+  if (remaining > 0) {
     const adj = await store.applyLedgerAdjustment({
       giftCardId: id,
       type: 'refund_debit',
-      magnitudeMinor: card.balanceMinor,
+      magnitudeMinor: remaining,
       reason: actor.reason,
       createdBy: actor.actorId,
       idempotencyKey: `refund:${id}`,
     })
     if (!adj.ok) return { ok: false, message: adj.message }
   }
-  // Best-effort provider refund.
-  try {
-    if (payment?.providerPaymentId) {
-      await getPaymentProvider().refundPayment({
+  const t = await store.transitionStatus(id, 'refunded', actor)
+  if (!t.ok) return t
+
+  // A manual activation has no provider charge to refund.
+  let provider: ProviderRefundOutcome = 'not_attempted'
+  let providerError: string | null = null
+  if (remaining > 0 && payment?.providerPaymentId && payment.provider !== 'manual' && !payment.providerPaymentId.startsWith('manual_')) {
+    try {
+      const r = await getPaymentProvider().refundPayment({
         providerPaymentId: payment.providerPaymentId,
-        amountMinor: card.initialAmountMinor,
+        amountMinor: remaining,
         currency: card.currency,
         reason: actor.reason,
       })
+      provider = r.status === 'refunded' ? 'refunded' : 'failed'
+    } catch (e) {
+      provider = 'failed'
+      providerError = e instanceof Error ? e.message : String(e)
     }
-  } catch {
-    /* logged below via audit; refund status still recorded */
   }
-  const t = await store.transitionStatus(id, 'refunded', actor)
-  return t
+  await store.appendAudit({
+    actorId: actor.actorId,
+    actorRole: actor.actorRole,
+    action: 'giftcard.provider_refund',
+    entityType: 'gift_card',
+    entityId: id,
+    reason: actor.reason,
+    metadata: { outcome: provider, amountMinor: remaining, error: providerError },
+  })
+  return { ok: true, provider, refundedMinor: remaining }
+}
+
+/** Never say "refunded" when the money did not go back: the provider step is separate. */
+export function describeRefund(provider: ProviderRefundOutcome | undefined, refundedMinor: Minor | undefined): string {
+  const amount = formatMoney(refundedMinor ?? 0)
+  if (provider === 'refunded') return `השובר הוחזר ו-${amount} זוכו לקונה ב-Grow`
+  if (!refundedMinor) return 'השובר סומן כמוחזר. לא נותרה יתרה להחזיר'
+  return `השובר סומן כמוחזר והיתרה אופסה, אבל ${amount} לא הוחזרו אוטומטית. יש לבצע זיכוי ידני ב-Grow`
 }
 
 export async function reissueCard(id: string, actor: Actor): Promise<{ ok: boolean; newCard?: GiftCard; message?: string }> {
@@ -166,6 +210,8 @@ export async function adjustBalance(
   direction: 'increase' | 'decrease',
   amountMinor: Minor,
   actor: Actor,
+  /** Same key twice = one adjustment (a retried request must not move money twice). */
+  idempotencyKey?: string,
 ): Promise<{ ok: boolean; message?: string }> {
   return getStore().applyLedgerAdjustment({
     giftCardId: id,
@@ -174,5 +220,6 @@ export async function adjustBalance(
     reason: actor.reason,
     createdBy: actor.actorId,
     approvedBy: actor.actorId,
+    idempotencyKey: idempotencyKey ?? null,
   })
 }
