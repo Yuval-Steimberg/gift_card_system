@@ -168,7 +168,7 @@ export class SupabaseStore implements GiftCardStore {
   async updateGiftCardFields(
     id: string,
     fields: Partial<Pick<GiftCard, 'recipientName' | 'recipientEmail' | 'recipientPhone' | 'scheduledDeliveryAt' | 'expiresAt'>>,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<GiftCard> {
     const patch: Record<string, unknown> = {}
     if (fields.recipientName !== undefined) patch.recipient_name = fields.recipientName

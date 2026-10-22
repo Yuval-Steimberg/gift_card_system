@@ -74,6 +74,13 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   `getAdminStats()` + `getDeliveryHealth()` COUNTS and agorot only (`lib/integration/summary.ts`) — never
   codes, tokens, names or emails. Reuse, don't re-implement: the command center must not compute "a sale"
   itself. Tests: `tests/integration/integration-summary.test.ts`.
+  Same key gate (`lib/integration/route.ts` `gate()`), also: `GET cards?q=` (search) and `GET cards/:id`
+  (detail) — **masked code only (`maskCode`), never the full code or public token** — plus three writes
+  that reuse the /admin paths: `POST cards/:id/resend`, `POST cards/:id/recipient` (= `editRecipient` in
+  `lib/gift-cards/recipient.ts`, the ONE implementation /admin also calls) and
+  `POST delivery/resend-undelivered`. Every write requires `actor {email, role}` + a reason and lands
+  in `audit_logs` as `actorRole: 'command_center'` naming that person (`actor_id` stays NULL — the
+  command center is not a profile). Tests: `tests/integration/integration-cards.test.ts`.
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 

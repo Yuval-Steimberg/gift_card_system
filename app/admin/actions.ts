@@ -13,8 +13,7 @@ import {
   suspendCard,
 } from '@/lib/gift-cards/admin-service'
 import { parseMajorToMinor } from '@/lib/money'
-import { checkEmail } from '@/lib/validation/email'
-import { isFullName, normalizeIsraeliPhone } from '@/lib/validation/purchase'
+import { editRecipient, type RecipientFields } from '@/lib/gift-cards/recipient'
 
 type ActionResult = { ok: boolean; message?: string }
 
@@ -178,59 +177,14 @@ export async function adminResendAllFailed(): Promise<
  */
 export async function adminEditRecipient(
   id: string,
-  fields: { recipientName?: string; recipientEmail?: string; recipientPhone?: string; scheduledDeliveryAt?: string | null },
+  fields: RecipientFields,
   reason: string,
   options: { resend?: boolean } = {},
 ): Promise<ActionResult & { resent?: boolean }> {
   const user = await assertPermission('giftcard:edit_recipient')
-  if (reason.trim().length < 3) return { ok: false, message: 'נא לפרט סיבה (נשמרת ביומן הביקורת)' }
-
-  const patch: typeof fields = {}
-
-  const name = fields.recipientName?.trim()
-  if (name) {
-    if (!isFullName(name)) return { ok: false, message: 'שם הנמען/ת חייב להיות שם מלא (שם פרטי ומשפחה)' }
-    patch.recipientName = name
-  }
-
-  const email = fields.recipientEmail?.trim()
-  if (email) {
-    // Same 2 client-safe layers the checkout wizard uses (syntax + typo). The
-    // DNS layer is deliberately not run here: an admin fixing a bounced address
-    // should not be blocked by a transient lookup.
-    const check = checkEmail(email)
-    if (!check.ok) return { ok: false, message: check.error ?? 'כתובת אימייל לא תקינה' }
-    patch.recipientEmail = email
-  }
-
-  const phone = fields.recipientPhone?.trim()
-  if (phone) {
-    const normalized = normalizeIsraeliPhone(phone)
-    if (!normalized) return { ok: false, message: 'מספר טלפון נייד לא תקין' }
-    patch.recipientPhone = normalized
-  }
-
-  if (fields.scheduledDeliveryAt !== undefined) patch.scheduledDeliveryAt = fields.scheduledDeliveryAt
-  if (Object.keys(patch).length === 0) return { ok: false, message: 'לא הוזנו שינויים' }
-
-  try {
-    await getStore().updateGiftCardFields(id, patch, { actorId: user.id, actorRole: user.role, reason })
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'שגיאה בעדכון פרטי הנמען/ת' }
-  }
-
-  // Resend AFTER the update committed, so the card goes to the new address.
-  let resent = false
-  if (options.resend) {
-    const res = await resendGiftCard(id)
-    resent = res.ok
-    if (!res.ok) {
-      revalidate(id)
-      return { ok: true, resent: false, message: res.message ?? 'הפרטים עודכנו, אך השליחה נכשלה' }
-    }
-  }
-  revalidate(id)
-  return { ok: true, resent }
+  const res = await editRecipient(id, fields, { actorId: user.id, actorRole: user.role, reason }, options)
+  if (res.ok) revalidate(id)
+  return res
 }
 
 export async function adminReverseRedemption(
