@@ -174,7 +174,7 @@ export class MemoryStore implements GiftCardStore {
   async updateGiftCardFields(
     id: string,
     fields: Partial<Pick<GiftCard, 'recipientName' | 'recipientEmail' | 'recipientPhone' | 'scheduledDeliveryAt' | 'expiresAt'>>,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<GiftCard> {
     const card = this.cards.get(id)
     if (!card) throw new Error('gift card not found')

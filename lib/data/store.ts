@@ -227,7 +227,7 @@ export interface GiftCardStore {
         'recipientName' | 'recipientEmail' | 'recipientPhone' | 'scheduledDeliveryAt' | 'expiresAt'
       >
     >,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<GiftCard>
 
   // payment
