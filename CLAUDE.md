@@ -69,6 +69,11 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   **`apply-updates.sql`** = 0004+0005+0006 in one paste, for an EXISTING database (a new one runs
   `setup.sql`, which already contains them). Idempotent; deploy the app FIRST (0005 changes a
   function signature).
+- `app/api/integration/v1/summary/route.ts` — **read-only machine API for the JAS Command Center**
+  (`Authorization: Bearer $INTEGRATION_API_KEY`, 32+ chars; unset = 404). Returns
+  `getAdminStats()` + `getDeliveryHealth()` COUNTS and agorot only (`lib/integration/summary.ts`) — never
+  codes, tokens, names or emails. Reuse, don't re-implement: the command center must not compute "a sale"
+  itself. Tests: `tests/integration/integration-summary.test.ts`.
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 
