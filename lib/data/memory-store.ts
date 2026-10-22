@@ -596,7 +596,7 @@ export class MemoryStore implements GiftCardStore {
   async transitionStatus(
     giftCardId: string,
     to: GiftCardStatus,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; message?: string }> {
     return this.mutex.runExclusive(giftCardId, async () => {
       const card = this.cards.get(giftCardId)
@@ -622,7 +622,7 @@ export class MemoryStore implements GiftCardStore {
     giftCardId: string,
     newCode: string,
     newToken: string,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; newCard?: GiftCard; message?: string }> {
     return this.mutex.runExclusive(giftCardId, async () => {
       const old = this.cards.get(giftCardId)

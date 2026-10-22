@@ -146,7 +146,7 @@ export interface LedgerAdjustmentInput {
   type: LedgerEntryType
   magnitudeMinor: Minor
   reason: string
-  createdBy: string
+  createdBy: string | null
   approvedBy?: string | null
   referenceType?: string | null
   referenceId?: string | null
@@ -249,13 +249,13 @@ export interface GiftCardStore {
   transitionStatus(
     giftCardId: string,
     to: GiftCardStatus,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; message?: string }>
   reissue(
     giftCardId: string,
     newCode: string,
     newToken: string,
-    audit: { actorId: string; actorRole: string; reason: string },
+    audit: { actorId: string | null; actorRole: string; reason: string },
   ): Promise<{ ok: boolean; newCard?: GiftCard; message?: string }>
 
   // delivery
