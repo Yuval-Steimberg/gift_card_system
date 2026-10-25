@@ -359,6 +359,10 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     same rule to rows already recorded, so the old ones drop out of the sweep without a migration.
     **Fail-safe direction:** only a payload that HAS a description that is NOT a gift card is
     skipped — no description, or an order ref, still counts as ours (a false alarm beats lost money).
+    Exception: `paymentSource` "אפליקציית POS" (the card terminal) is always a shop sale — those
+    often carry NO description, and gift cards are only sold via payment links. ₪0 events (test
+    pings) are dropped from the sweep too. Verified on the live DB (Oct 2026): of 354 orphan
+    events in 30 days, zero were gift cards.
     If the gift-card description in the Make scenario ever changes, keep "שובר מתנה" in it.
     Verify the live rows with `supabase/diagnose-unmatched-payments.sql` (read-only).
     Tests: `tests/unit/grow-scope.test.ts`, `tests/integration/payment-matching.test.ts`.

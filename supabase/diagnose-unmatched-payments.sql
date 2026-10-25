@@ -14,6 +14,8 @@
 SELECT
   CASE
     WHEN coalesce(raw->>'cField1', raw->>'order_ref', '') <> '' THEN 'GIFT CARD — no match'
+    WHEN raw->>'paymentSource' ~* '\mPOS\M'                         THEN 'shop sale (ignored)'
+    WHEN coalesce(amount_minor, 0) <= 0                              THEN 'zero amount (ignored)'
     WHEN coalesce(nullif(trim(raw->>'paymentDesc'), ''), nullif(trim(raw->>'description'), '')) IS NULL
       THEN 'unknown — check Grow'
     WHEN coalesce(raw->>'paymentDesc', raw->>'description') ~* '(שובר\s*מתנה|gift\s*card)'

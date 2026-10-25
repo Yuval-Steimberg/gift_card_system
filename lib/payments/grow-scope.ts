@@ -15,12 +15,19 @@
  * what it was for and that is not a gift card. A payload with no description at
  * all, or with our order ref, stays ours — mislabelling a real gift-card payment
  * as foreign would drop money silently, while the reverse is only a false alarm.
+ *
+ * The one exception is the shop's card terminal: Grow tags those charges
+ * `paymentSource: "אפליקציית POS"` and often sends them with NO description.
+ * Gift cards are only ever sold through a payment link, never at the
+ * terminal, so a POS charge is a shop sale whatever its description says.
  */
 const GIFT_CARD_MARKER = /שובר\s*מתנה|gift\s*card/i
+const POS_SOURCE = /\bPOS\b/i
 
 export function isGiftCardGrowPayment(raw: Record<string, unknown> | null | undefined): boolean {
   if (!raw) return true
   if (raw.cField1 || raw.order_ref || raw.orderRef) return true
+  if (POS_SOURCE.test(String(raw.paymentSource ?? ''))) return false
   const desc = String(raw.paymentDesc ?? raw.description ?? '').trim()
   if (!desc) return true
   return GIFT_CARD_MARKER.test(desc)

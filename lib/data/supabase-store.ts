@@ -601,6 +601,8 @@ export class SupabaseStore implements GiftCardStore {
     // webhook covers the whole account) are dropped here, so the lookback is
     // clean too — not only callbacks that arrive from now on.
     report.unmatchedPayments = (orphanEvents ?? [])
+      // A ₪0 event (a provider test ping) took no money, so it needs no human.
+      .filter((e) => Number(e.amount_minor ?? 0) > 0)
       .filter((e) => e.provider !== 'grow' || isGiftCardGrowPayment(e.raw as Record<string, unknown> | null))
       .map((e) => ({
         provider: String(e.provider),
