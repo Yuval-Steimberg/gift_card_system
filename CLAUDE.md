@@ -348,6 +348,20 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     created (a deliberate resend of a delivered card creates a newer job, so it still sends).
     Buyer RECEIPT emails that failed in an outage are not retried by any of this.
     Tests: `tests/integration/email-outage-recovery.test.ts`.
+22. **Grow's webhook reports the WHOLE SHOP's sales, not just gift cards.** Because the callback is
+    account-wide (#8c), every card-terminal / website charge on the Grow account reached
+    `/api/webhooks/payment`, matched no card, and was recorded as an "unmatched payment" — the daily
+    sweep listed **142** of them in two weeks (₪1, ₪14, ₪663…, mostly no payer email). Worse, matching
+    a shop sale by email + amount could have activated an unrelated pending card for free.
+    `lib/payments/grow-scope.ts` `isGiftCardGrowPayment()` classifies by Grow's `paymentDesc`: ours
+    carry "שובר מתנה" (the description we send). `verifyWebhook` sets `notGiftCard`, and
+    `processVerifiedPaymentEvent` returns before touching the store; `getDeliveryHealth` applies the
+    same rule to rows already recorded, so the old ones drop out of the sweep without a migration.
+    **Fail-safe direction:** only a payload that HAS a description that is NOT a gift card is
+    skipped — no description, or an order ref, still counts as ours (a false alarm beats lost money).
+    If the gift-card description in the Make scenario ever changes, keep "שובר מתנה" in it.
+    Verify the live rows with `supabase/diagnose-unmatched-payments.sql` (read-only).
+    Tests: `tests/unit/grow-scope.test.ts`, `tests/integration/payment-matching.test.ts`.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

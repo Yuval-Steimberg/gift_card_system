@@ -38,6 +38,10 @@ export interface VerifiedPaymentEvent {
   /** Payer email, when the provider supplies it — used to match the card when
    *  the provider callback omits the order reference (e.g. Grow Payment Links). */
   customerEmail?: string
+  /** The provider reports this charge as something other than a gift card (a
+   *  shop sale reaching us through Grow's account-wide webhook). It is ignored:
+   *  never matched to a card, never reported as unmatched. */
+  notGiftCard?: boolean
   /** The raw verified payload, stored for audit/reconciliation. */
   raw: Record<string, unknown>
 }

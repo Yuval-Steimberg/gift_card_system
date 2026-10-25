@@ -16,6 +16,7 @@ import { supabaseAdmin } from './supabase-client'
 import { PAYMENT_MATCH_WINDOW_DAYS, STALE_CLAIM_MS } from './store'
 import type { DeliveryHealthReport } from './store'
 import type { EmailProviderEvent } from '@/lib/delivery/email/events'
+import { isGiftCardGrowPayment } from '@/lib/payments/grow-scope'
 import { defaultSystemSettings } from './seed-data'
 import type {
   ActivateFromPaymentInput,
@@ -596,15 +597,20 @@ export class SupabaseStore implements GiftCardStore {
       .is('gift_card_id', null)
       .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
-    report.unmatchedPayments = (orphanEvents ?? []).map((e) => ({
-      provider: String(e.provider),
-      eventId: String(e.event_id),
-      amountMinor: Number(e.amount_minor ?? 0),
-      payerEmail: (e.raw as Record<string, unknown> | null)?.payerEmail
-        ? String((e.raw as Record<string, unknown>).payerEmail)
-        : null,
-      createdAt: String(e.created_at),
-    }))
+    // Shop sales recorded before the webhook learned to skip them (Grow's
+    // webhook covers the whole account) are dropped here, so the lookback is
+    // clean too — not only callbacks that arrive from now on.
+    report.unmatchedPayments = (orphanEvents ?? [])
+      .filter((e) => e.provider !== 'grow' || isGiftCardGrowPayment(e.raw as Record<string, unknown> | null))
+      .map((e) => ({
+        provider: String(e.provider),
+        eventId: String(e.event_id),
+        amountMinor: Number(e.amount_minor ?? 0),
+        payerEmail: (e.raw as Record<string, unknown> | null)?.payerEmail
+          ? String((e.raw as Record<string, unknown>).payerEmail)
+          : null,
+        createdAt: String(e.created_at),
+      }))
 
     // 2. Cards that took a payment callback but never went active.
     const { data: cards } = await this.db
