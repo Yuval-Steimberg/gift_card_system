@@ -14,6 +14,13 @@ describe('isGiftCardGrowPayment (Grow webhook fires for EVERY sale on the accoun
     expect(isGiftCardGrowPayment({ description: 'הזמנה מהאתר #1234' })).toBe(false)
   })
 
+  it('drops a card-terminal (POS) charge even with no description', () => {
+    expect(isGiftCardGrowPayment({ paymentSource: 'אפליקציית POS', paymentSum: '14' })).toBe(false)
+    expect(isGiftCardGrowPayment({ paymentSource: 'אפליקציית POS', paymentDesc: '' })).toBe(false)
+    // A payment link with no description is still possibly ours.
+    expect(isGiftCardGrowPayment({ paymentSource: 'Payment Links', paymentSum: '20' })).toBe(true)
+  })
+
   it('fails safe: no description, or our order ref, stays a gift-card payment', () => {
     expect(isGiftCardGrowPayment({ paymentSum: '100' })).toBe(true)
     expect(isGiftCardGrowPayment({ paymentDesc: '   ' })).toBe(true)
