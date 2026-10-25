@@ -140,6 +140,9 @@ export async function createPurchase(input: PurchaseInput): Promise<CreatePurcha
  */
 export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): Promise<void> {
   const store = getStore()
+  // A shop sale that reached us through Grow's account-wide webhook. Not ours:
+  // matching it by email + amount could even activate an unrelated pending card.
+  if (event.notGiftCard) return
   if (event.status !== 'paid') {
     // Record non-paid outcomes; do not activate.
     await store.appendAudit({

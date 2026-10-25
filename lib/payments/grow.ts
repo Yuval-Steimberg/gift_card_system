@@ -1,5 +1,6 @@
 import { toMajor } from '@/lib/money'
 import { normalizeIsraeliPhone, isFullName } from '@/lib/validation/purchase'
+import { isGiftCardGrowPayment } from './grow-scope'
 import {
   WebhookVerificationError,
   type CheckoutSession,
@@ -222,6 +223,7 @@ export class GrowPaymentProvider implements PaymentProvider {
       amountMinor: Math.round(majorSum * 100),
       currency: 'ILS',
       customerEmail: customerEmail || undefined,
+      notGiftCard: !isGiftCardGrowPayment(data),
       raw: data,
     }
   }

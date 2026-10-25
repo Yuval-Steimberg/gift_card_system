@@ -108,3 +108,19 @@ describe('payment webhook matching (no order_ref, Grow Payment Links)', () => {
     expect(await statusOf(b)).toBe('awaiting_payment')
   })
 })
+
+describe('shop sales arriving through Grow\'s account-wide webhook', () => {
+  it('are ignored: no activation, no "unmatched payment" alarm', async () => {
+    const { processVerifiedPaymentEvent } = await import('@/lib/gift-cards/service')
+    // A pending ₪200 card from the same address: a shop sale must NOT pay for it.
+    const { giftCardId: id } = await createPurchase(base)
+    await processVerifiedPaymentEvent({
+      provider: 'grow', eventId: 'shop-1', orderRef: '', providerPaymentId: 'shop-1', status: 'paid',
+      amountMinor: toMinor(200), currency: 'ILS', customerEmail: 'office@1to1landscape.com',
+      notGiftCard: true, raw: { paymentDesc: 'מכירה בחנות' },
+    })
+    expect(await statusOf(id!)).not.toBe('active')
+    const health = await getStore().getDeliveryHealth(new Date(0).toISOString())
+    expect(health.unmatchedPayments).toHaveLength(0)
+  })
+})
