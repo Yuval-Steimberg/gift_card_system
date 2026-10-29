@@ -103,7 +103,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 127 unit + integration tests (money, concurrency, idempotency)
+npm test               # 162 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -366,6 +366,15 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     If the gift-card description in the Make scenario ever changes, keep "שובר מתנה" in it.
     Verify the live rows with `supabase/diagnose-unmatched-payments.sql` (read-only).
     Tests: `tests/unit/grow-scope.test.ts`, `tests/integration/payment-matching.test.ts`.
+
+23. **The redemption console must never default to "spend everything".** It used to prefill the
+    amount with the full balance and, after a partial redemption, re-prefill it with what was left —
+    one extra tap of "אישור פדיון" emptied the card (reported: ₪20 off a ₪30 card ended "נוצל
+    במלואו"). Now the amount starts empty (prefilled only when partial redemption is disabled),
+    is cleared after success, the button shows the amount, a live "יתרה לאחר הפדיון" line is shown,
+    and the idempotency key is reused for a repeated tap with the same card+amount. Every new debit
+    also emails the recipient what was spent and what is left (`renderRedemptionEmail`, best-effort,
+    never on a `duplicate`). Tests: `tests/integration/redemption-receipt.test.ts`.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 

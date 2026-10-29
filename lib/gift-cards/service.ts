@@ -5,7 +5,7 @@ import { getPaymentProvider, type VerifiedPaymentEvent } from '@/lib/payments'
 import { getEmailProvider } from '@/lib/delivery/email'
 import { getReceiptProvider } from '@/lib/accounting'
 import { generateGiftCardCode, generatePublicToken } from './codes'
-import { renderBuyerConfirmationEmail, renderRecipientEmail } from '@/lib/delivery/render'
+import { renderBuyerConfirmationEmail, renderRecipientEmail, renderRedemptionEmail } from '@/lib/delivery/render'
 import { generateGiftCardPdf } from './pdf'
 import { recipientUrl } from './qr'
 import { reportError } from '@/lib/logging/report'
@@ -417,7 +417,41 @@ export async function resendGiftCard(giftCardId: string): Promise<{ ok: boolean;
 }
 
 export async function redeemGiftCard(input: RedeemInput): Promise<RedeemResult> {
-  return getStore().redeem(input)
+  const result = await getStore().redeem(input)
+  // Only a NEW debit notifies — a 'duplicate' replay already sent its email.
+  if (result.code === 'ok' && result.balanceAfterMinor != null) {
+    await notifyRecipientOfRedemption(input.giftCardId, input.amountMinor, result.balanceAfterMinor)
+  }
+  return result
+}
+
+/**
+ * Tell the recipient what was just spent and what is left. Best-effort: the
+ * redemption is already committed, so a failed email is reported, never thrown
+ * back at the cashier (they would retry and the customer would be confused).
+ */
+async function notifyRecipientOfRedemption(giftCardId: string, amountMinor: number, balanceAfterMinor: number): Promise<void> {
+  try {
+    const store = getStore()
+    const card = await store.getGiftCardById(giftCardId)
+    if (!card?.recipientEmail) return
+    const settings = await store.getSettings()
+    const mail = renderRedemptionEmail(card, amountMinor, balanceAfterMinor, serverEnv().APP_BASE_URL, {
+      name: settings.businessName,
+      address: settings.storeAddress,
+      phone: settings.businessPhone,
+      email: settings.businessEmail,
+    })
+    await getEmailProvider().send({
+      to: card.recipientEmail,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+      metadata: { giftCardId: card.id, kind: 'redemption_receipt' },
+    })
+  } catch (err) {
+    await reportError(err, { scope: 'notifyRecipientOfRedemption', giftCardId })
+  }
 }
 
 /** Public, PII-minimized view for the recipient page. */

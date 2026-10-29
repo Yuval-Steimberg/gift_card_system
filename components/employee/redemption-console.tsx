@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { QrScanner } from './qr-scanner'
 import { Loader, Search } from '@/components/icons'
-import { parseMajorToMinor, formatMoney } from '@/lib/money'
+import { parseMajorToMinor, formatMoney, toMajor } from '@/lib/money'
 import { lookupCard, performRedemption, type LookupResult, type RedeemResponse } from '@/app/employee/actions'
 
 export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
@@ -19,6 +19,11 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
   const [redeeming, setRedeeming] = useState(false)
   const [result, setResult] = useState<RedeemResponse | null>(null)
   const [offline, setOffline] = useState(false)
+  // One idempotency key per redemption ATTEMPT (card + amount). A second tap
+  // with the same card and amount — a double-tap, or "it didn't react, tap
+  // again" — reuses it, so the server answers 'duplicate' instead of debiting
+  // again. A new card or a new amount is a new attempt and gets a new key.
+  const attemptRef = useRef<{ fingerprint: string; key: string } | null>(null)
 
   // `keepResult` is used by the post-redemption refresh: re-reading the card must
   // NOT wipe the "הפדיון בוצע בהצלחה · יתרה מעודכנת" banner the cashier just got.
@@ -38,7 +43,13 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
     try {
       const res = await lookupCard(q)
       setLookup(res)
-      if (res.card?.redeemable) setAmount(res.card.balanceLabel.replace(/[^\d.]/g, ''))
+      // The amount is NOT prefilled with the balance when partial redemption is
+      // allowed: a prefilled full balance meant a cashier who didn't retype it
+      // (or tapped "אישור" again after a partial redemption, when the field was
+      // re-filled with what was left) emptied the whole card. Only when partial
+      // redemption is disabled is the full balance the one valid amount.
+      if (res.card?.redeemable && !allowPartial) setAmount(majorString(res.card.balanceMinor))
+      else if (!keepResult) setAmount('')
     } finally {
       setLooking(false)
     }
@@ -60,9 +71,11 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
       return
     }
     setRedeeming(true)
-    // Idempotency key generated ONCE per redemption attempt; a double-click
-    // reuses it so the server never double-charges.
-    const idempotencyKey = crypto.randomUUID()
+    const fingerprint = `${lookup.card.id}:${amountMinor}`
+    if (attemptRef.current?.fingerprint !== fingerprint) {
+      attemptRef.current = { fingerprint, key: crypto.randomUUID() }
+    }
+    const idempotencyKey = attemptRef.current.key
     try {
       const res = await performRedemption({
         giftCardId: lookup.card.id,
@@ -72,7 +85,12 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
       })
       setResult(res)
       if (res.ok) {
-        // refresh card view, keeping the success banner visible
+        // Clear the amount so the next redemption on this card must be typed
+        // deliberately, then refresh the card view keeping the success banner.
+        setAmount('')
+        // This attempt is done: a later redemption of the same amount is a
+        // genuinely new purchase and must get its own key.
+        attemptRef.current = null
         await doLookup(lookup.card.code, true)
       }
     } finally {
@@ -81,6 +99,7 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
   }
 
   const card = lookup?.card
+  const pendingMinor = amount.trim() ? parseMajorToMinor(amount) : null
 
   return (
     <div className="space-y-5">
@@ -151,20 +170,38 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
                     className="text-lg font-bold"
                   />
                   {allowPartial && (
-                    <Button variant="outline" onClick={() => setAmount(card.balanceLabel.replace(/[^\d.]/g, ''))}>
+                    <Button variant="outline" onClick={() => setAmount(majorString(card.balanceMinor))}>
                       מלא
                     </Button>
                   )}
                 </div>
                 {!allowPartial && <p className="text-xs text-muted-foreground">פדיון חלקי מושבת בהגדרות המערכת.</p>}
+                {pendingMinor != null && pendingMinor > 0 && pendingMinor <= card.balanceMinor && (
+                  <p className="text-sm text-muted-foreground">
+                    יתרה לאחר הפדיון:{' '}
+                    <span dir="ltr" style={{ unicodeBidi: 'embed' }} className="font-bold text-foreground">
+                      {formatMoney(card.balanceMinor - pendingMinor)}
+                    </span>
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="saleref">אסמכתא / מספר מכירה (לא חובה)</Label>
                 <Input id="saleref" dir="ltr" value={saleRef} onChange={(e) => setSaleRef(e.target.value)} />
               </div>
-              <Button className="w-full" size="lg" onClick={doRedeem} disabled={redeeming}>
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={doRedeem}
+                disabled={redeeming || pendingMinor == null || pendingMinor <= 0}
+              >
                 {redeeming ? <Loader className="h-4 w-4" /> : null}
                 אישור פדיון
+                {pendingMinor != null && pendingMinor > 0 && (
+                  <span dir="ltr" style={{ unicodeBidi: 'embed' }}>
+                    {formatMoney(pendingMinor)}
+                  </span>
+                )}
               </Button>
             </div>
           ) : (
@@ -195,4 +232,9 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
       )}
     </div>
   )
+}
+
+/** Balance as a plain editable number ("30", "12.5"), never the formatted label. */
+function majorString(minor: number): string {
+  return String(toMajor(minor))
 }

@@ -74,3 +74,51 @@ export function renderBuyerConfirmationEmail(
   const text = `תודה על הרכישה. שובר מתנה ${amount} עבור ${card.recipientName}.`
   return { subject, html: shell(inner, 'rtl'), text }
 }
+
+/** Recipient email after an in-store redemption: what was spent and what is left. */
+export function renderRedemptionEmail(
+  card: GiftCard,
+  amountMinor: number,
+  balanceAfterMinor: number,
+  baseUrl: string,
+  business: BusinessInfo,
+): { subject: string; html: string; text: string } {
+  const rtl = card.recipientLanguage === 'he'
+  const url = recipientUrl(baseUrl, card.publicToken)
+  const spent = formatMoney(amountMinor, card.currency)
+  const left = formatMoney(balanceAfterMinor, card.currency)
+  const used = balanceAfterMinor === 0
+  const ltr = (v: string) => `<strong dir="ltr" style="unicode-bidi:embed;">${v}</strong>`
+
+  const subject = rtl
+    ? used
+      ? 'השובר מומש במלואו · Just A Second'
+      : `נותרה יתרה של ${left} בשובר · Just A Second`
+    : used
+      ? 'Your gift card has been fully used · Just A Second'
+      : `${left} left on your gift card · Just A Second`
+  const heading = rtl ? `${escapeHtml(card.recipientName)}, תודה שבאת` : `Thanks for visiting, ${escapeHtml(card.recipientName)}`
+  const line = rtl ? `מומשו ${ltr(spent)} מהשובר.` : `${ltr(spent)} was redeemed from your gift card.`
+  const balance = used
+    ? rtl
+      ? 'השובר מומש במלואו.'
+      : 'The gift card is now fully used.'
+    : rtl
+      ? `היתרה שנותרה: ${ltr(left)} — אפשר לממש אותה בביקור הבא.`
+      : `Remaining balance: ${ltr(left)} — use it on your next visit.`
+  const cta = rtl ? 'לצפייה בשובר' : 'View your gift card'
+  const contact = business.email
+    ? `${rtl ? 'משהו לא נראה נכון? כתבו לנו' : 'Something looks wrong? Write to us'}: <span dir="ltr" style="unicode-bidi:embed;">${escapeHtml(business.email)}</span>`
+    : ''
+
+  const inner = `
+<h1 style="font-size:22px;">${heading}</h1>
+<p style="font-size:15px;">${line}</p>
+<p style="font-size:15px;">${balance}</p>
+${used ? '' : `<a href="${url}" style="display:inline-block;margin-top:8px;background:#E88225;color:#FFFCF5;text-decoration:none;padding:10px 24px;border-radius:999px;font-weight:700;">${cta}</a>`}
+<p style="font-size:13px;color:#626B65;margin-top:20px;">${contact}</p>`
+
+  const strip = (h: string) => h.replace(/<[^>]+>/g, '')
+  const text = `${strip(heading)}\n${strip(line)}\n${strip(balance)}${used ? '' : `\n\n${cta}: ${url}`}`
+  return { subject, html: shell(inner, rtl ? 'rtl' : 'ltr'), text }
+}

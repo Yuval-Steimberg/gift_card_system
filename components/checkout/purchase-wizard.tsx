@@ -323,6 +323,10 @@ export function PurchaseWizard({ templates, settings }: Props) {
           {step === 3 && (
             <fieldset className="space-y-4">
               <legend className="text-lg font-bold">פרטי הנמען/ת</legend>
+              <p className="text-sm text-muted-foreground">
+                השובר נשלח במייל מיד לאחר התשלום. רוצה למסור אותו בעצמך, במועד אחר? השאירו את שם הנמען/ת והזינו
+                את כתובת המייל שלכם — השובר (כולל PDF להדפסה) יגיע אליכם ותוכלו להעביר אותו מתי שתרצו.
+              </p>
               <Field label="שם הנמען/ת (פרטי ומשפחה)" value={recipientName} onChange={setRecipientName} required />
               {recipientName.trim().length > 0 && !nameOk(recipientName) && (
                 <p className="text-xs text-destructive">נא להזין שם פרטי ושם משפחה, אותיות בלבד (ללא מספרים).</p>
