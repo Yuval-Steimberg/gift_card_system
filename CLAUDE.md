@@ -103,7 +103,7 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
 
 ```bash
 npm run dev            # local dev (memory store, no creds needed) → :3000
-npm test               # 162 unit + integration tests (money, concurrency, idempotency)
+npm test               # 165 unit + integration tests (money, concurrency, idempotency)
 npm run typecheck / lint / build
 npm run verify:supabase   # exercise the LIVE Supabase (tables + atomic RPC cycle). Needs .env.local
 npm run verify:email you@x # send a real Resend test email. Needs RESEND_API_KEY + EMAIL_FROM
@@ -375,6 +375,15 @@ To go from this test deploy to **real production**, follow `docs/GO-LIVE-PRODUCT
     and the idempotency key is reused for a repeated tap with the same card+amount. Every new debit
     also emails the recipient what was spent and what is left (`renderRedemptionEmail`, best-effort,
     never on a `duplicate`). Tests: `tests/integration/redemption-receipt.test.ts`.
+
+24. **Staff get a "new card sold" email per activated card** when `SALE_NOTIFY_EMAILS` (comma list)
+    is set in Vercel (unset = off; redeploy after changing it, gotcha #2). Sent at the END of
+    `processVerifiedPaymentEvent` — after the delivery attempt — so it reports what really happened:
+    delivered / scheduled / failed (+ error), receipt issued or not, verified vs manual activation.
+    Masked code only (`maskCode`); the full code is enough to spend the card. First-activation only, so
+    a replayed callback never notifies twice. It goes through the same email provider, so it is silent
+    when that provider is down (gotcha #21) — the reconcile watchdog is the independent alarm.
+    Tests: `tests/integration/sale-notification.test.ts`.
 
 ## Gift-card PDF — Hebrew rendering (fixed; don't regress)
 
