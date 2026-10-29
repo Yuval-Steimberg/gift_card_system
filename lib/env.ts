@@ -64,6 +64,10 @@ const rawServerSchema = z.object({
   // Webhook. When set, /api/webhooks/email verifies every event's ECDSA
   // signature (a forged bounce would otherwise mark a real card undelivered).
   SENDGRID_WEBHOOK_PUBLIC_KEY: z.string().optional(),
+  // Comma-separated staff addresses that get a "new card sold" email for every
+  // activated card (amount, buyer, recipient, delivery + receipt status).
+  // Unset = no sale notifications.
+  SALE_NOTIFY_EMAILS: z.string().optional(),
 
   RECEIPT_PROVIDER: z.enum(['mock', 'greeninvoice']).catch('mock'),
   GREENINVOICE_API_URL: z.string().optional(),

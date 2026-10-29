@@ -122,3 +122,55 @@ ${used ? '' : `<a href="${url}" style="display:inline-block;margin-top:8px;backg
   const text = `${strip(heading)}\n${strip(line)}\n${strip(balance)}${used ? '' : `\n\n${cta}: ${url}`}`
   return { subject, html: shell(inner, rtl ? 'rtl' : 'ltr'), text }
 }
+
+export interface SaleNotice {
+  maskedCode: string
+  adminUrl: string
+  delivery: { status: string; scheduledFor: string | null; error: string | null } | null
+  receipt: 'issued' | 'failed'
+  manual: boolean
+}
+
+/** Staff email for every activated card: what was sold and whether it reached the recipient. */
+export function renderSaleNotificationEmail(card: GiftCard, n: SaleNotice): { subject: string; html: string; text: string } {
+  const amount = formatMoney(card.initialAmountMinor, card.currency)
+  const d = n.delivery
+  const delivered = d && (d.status === 'sent' || d.status === 'delivered')
+  const scheduled = d && (d.status === 'scheduled' || d.status === 'pending') && d.scheduledFor && new Date(d.scheduledFor).getTime() > Date.now()
+  const deliveryLine = delivered
+    ? '✅ נשלח לנמען/ת'
+    : scheduled
+      ? `🕒 מתוזמן ל-${new Date(d!.scheduledFor!).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })}`
+      : d
+        ? `❌ לא נשלח (${escapeHtml(d.status)}${d.error ? `: ${escapeHtml(d.error)}` : ''})`
+        : '❌ לא נוצרה משימת משלוח'
+  const ok = Boolean(delivered || scheduled)
+  const subject = `${ok ? '✅' : '⚠️'} שובר חדש נמכר · ${amount} · ${card.recipientName}`
+  const ltr = (v: string) => `<span dir="ltr" style="unicode-bidi:embed;">${escapeHtml(v)}</span>`
+  const row = (k: string, v: string) =>
+    `<tr><td style="padding:4px 0 4px 12px;color:#626B65;white-space:nowrap;">${k}</td><td style="padding:4px 0;">${v}</td></tr>`
+
+  const inner = `
+<h1 style="font-size:20px;">שובר חדש נמכר: <span dir="ltr" style="unicode-bidi:embed;">${amount}</span></h1>
+<table style="font-size:14px;border-collapse:collapse;">
+${row('קוד', ltr(n.maskedCode))}
+${row('תשלום', n.manual ? 'הופעל ידנית (סימון כשולם)' : 'אומת אוטומטית')}
+${row('משלוח לנמען/ת', deliveryLine)}
+${row('קבלה', n.receipt === 'issued' ? '✅ הופקה' : '⚠️ לא הופקה')}
+${row('רוכש/ת', `${escapeHtml(card.buyerName ?? '')} · ${ltr(card.buyerEmail)}${card.buyerPhone ? ` · ${ltr(card.buyerPhone)}` : ''}`)}
+${row('נמען/ת', `${escapeHtml(card.recipientName)} · ${ltr(card.recipientEmail)}${card.recipientPhone ? ` · ${ltr(card.recipientPhone)}` : ''}`)}
+</table>
+<a href="${n.adminUrl}" style="display:inline-block;margin-top:16px;background:#E88225;color:#FFFCF5;text-decoration:none;padding:10px 24px;border-radius:999px;font-weight:700;">לשובר במערכת הניהול</a>`
+
+  const strip = (h: string) => h.replace(/<[^>]+>/g, '')
+  const text = [
+    `שובר חדש נמכר: ${amount}`,
+    `קוד: ${n.maskedCode}`,
+    `משלוח: ${strip(deliveryLine)}`,
+    `קבלה: ${n.receipt === 'issued' ? 'הופקה' : 'לא הופקה'}`,
+    `רוכש/ת: ${card.buyerName ?? ''} ${card.buyerEmail}`,
+    `נמען/ת: ${card.recipientName} ${card.recipientEmail}`,
+    n.adminUrl,
+  ].join('\n')
+  return { subject, html: shell(inner, 'rtl'), text }
+}

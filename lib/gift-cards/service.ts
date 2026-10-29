@@ -5,7 +5,14 @@ import { getPaymentProvider, type VerifiedPaymentEvent } from '@/lib/payments'
 import { getEmailProvider } from '@/lib/delivery/email'
 import { getReceiptProvider } from '@/lib/accounting'
 import { generateGiftCardCode, generatePublicToken } from './codes'
-import { renderBuyerConfirmationEmail, renderRecipientEmail, renderRedemptionEmail } from '@/lib/delivery/render'
+import {
+  renderBuyerConfirmationEmail,
+  renderRecipientEmail,
+  renderRedemptionEmail,
+  renderSaleNotificationEmail,
+  type SaleNotice,
+} from '@/lib/delivery/render'
+import { maskCode } from '@/lib/integration/cards'
 import { generateGiftCardPdf } from './pdf'
 import { recipientUrl } from './qr'
 import { reportError } from '@/lib/logging/report'
@@ -210,6 +217,7 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
   // Only run post-activation side-effects the first time (idempotent).
   if (result.code !== 'activated' || !result.giftCard) return
   const card = result.giftCard
+  let receiptStatus: SaleNotice['receipt'] = 'failed'
 
   // Receipt (accounting document). Failure is logged, not fatal.
   try {
@@ -241,6 +249,7 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
         error: receipt.error ?? null,
       },
     })
+    receiptStatus = receipt.status === 'issued' ? 'issued' : 'failed'
     // Buyer confirmation email.
     await sendBuyerConfirmation(card, receipt.documentNumber)
   } catch (err) {
@@ -266,6 +275,48 @@ export async function processVerifiedPaymentEvent(event: VerifiedPaymentEvent): 
   //   • any OTHER card that became due is flushed opportunistically on each
   //     purchase (a safety net against the once-a-day Vercel Hobby cron).
   await deliverDueJobs(new Date().toISOString(), 25)
+
+  await notifyStaffOfSale(card.id, { receipt: receiptStatus, manual: event.provider === 'manual' })
+}
+
+/**
+ * "New card sold" email to SALE_NOTIFY_EMAILS, sent AFTER the delivery attempt
+ * so it reports what actually happened (sent / scheduled / failed). Masked code
+ * only — the full code is enough to spend the card. Best-effort: never fails
+ * the activation it reports on.
+ */
+async function notifyStaffOfSale(giftCardId: string, info: { receipt: SaleNotice['receipt']; manual: boolean }): Promise<void> {
+  const env = serverEnv()
+  const to = (env.SALE_NOTIFY_EMAILS ?? '')
+    .split(',')
+    .map((a) => a.trim())
+    .filter(Boolean)
+  if (to.length === 0) return
+  try {
+    const store = getStore()
+    const card = await store.getGiftCardById(giftCardId)
+    if (!card) return
+    const jobs = await store.getDeliveryJobs(giftCardId)
+    const job = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+    const mail = renderSaleNotificationEmail(card, {
+      maskedCode: maskCode(card.code),
+      adminUrl: `${env.APP_BASE_URL}/admin/gift-cards/${card.id}`,
+      delivery: job ? { status: job.status, scheduledFor: job.scheduledFor, error: job.lastError } : null,
+      receipt: info.receipt,
+      manual: info.manual,
+    })
+    for (const addr of to) {
+      await getEmailProvider().send({
+        to: addr,
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+        metadata: { giftCardId: card.id, kind: 'sale_notification' },
+      })
+    }
+  } catch (err) {
+    await reportError(err, { scope: 'notifyStaffOfSale', giftCardId })
+  }
 }
 
 async function sendBuyerConfirmation(card: GiftCard, receiptNumber: string | null): Promise<void> {
