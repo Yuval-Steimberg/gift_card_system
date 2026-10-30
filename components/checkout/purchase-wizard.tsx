@@ -18,6 +18,8 @@ import type { SystemSettings } from '@/lib/data/store'
 interface Props {
   templates: GiftCardTemplate[]
   settings: SystemSettings
+  /** Preselected amount from the page's ?amount= link (see lib/gift-cards/initial-amount.ts). */
+  initialAmount?: { amountMinor: number; customAmount: string } | null
 }
 
 // Scheduled (מתוזמן) delivery is hidden for now — only immediate delivery is
@@ -51,15 +53,17 @@ const FIELD_LABEL: Record<string, string> = {
   acceptedTerms: 'אישור תנאי השובר',
 }
 
-export function PurchaseWizard({ templates, settings }: Props) {
+export function PurchaseWizard({ templates, settings, initialAmount }: Props) {
   const [step, setStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   // form state
-  const [amountMinor, setAmountMinor] = useState<number>(settings.presetAmountsMinor[1] ?? settings.minAmountMinor)
-  const [customAmount, setCustomAmount] = useState('')
+  const [amountMinor, setAmountMinor] = useState<number>(
+    initialAmount?.amountMinor ?? settings.presetAmountsMinor[1] ?? settings.minAmountMinor,
+  )
+  const [customAmount, setCustomAmount] = useState(initialAmount?.customAmount ?? '')
   const [templateId, setTemplateId] = useState(templates.find((t) => t.isDefault)?.id ?? templates[0]?.id ?? '')
   const [buyerName, setBuyerName] = useState('')
   const [buyerEmail, setBuyerEmail] = useState('')
