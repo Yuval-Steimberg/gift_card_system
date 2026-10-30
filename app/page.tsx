@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { GiftCardPreview } from '@/components/gift-card/gift-card-preview'
 import { ImpactNote } from '@/components/site/impact-note'
 import { getSettings } from '@/lib/gift-cards/service'
+import { formatValidity } from '@/lib/gift-cards/validity'
 import { formatMoney } from '@/lib/money'
 import { CreditCard, Gift, Mail, ShieldCheck } from '@/components/icons'
 
@@ -31,7 +32,7 @@ export default async function HomePage() {
                 <p className="font-semibold text-foreground">שימו לב:</p>
                 <ul className="mt-1 list-disc space-y-1 ps-5">
                   <li>השובר ניתן למימוש רק בחנות הפיזית שלנו. לא ניתן למימוש בחנות המקוונת.</li>
-                  <li>תוקף השובר ל-12 חודשים.</li>
+                  <li>תוקף השובר: {formatValidity(settings.expiryMonths)}.</li>
                 </ul>
               </div>
             </div>

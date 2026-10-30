@@ -135,7 +135,8 @@ export function defaultSystemSettings(): SystemSettings {
     minAmountMinor: toMinor(50),
     maxAmountMinor: toMinor(5000),
     allowCustomAmount: true,
-    expiryMonths: 12,
+    // Israeli consumer law: gift vouchers must be valid for at least five years.
+    expiryMonths: 60,
     allowPartialRedemption: true,
     greetingMaxLength: 500,
     termsUrl: '/terms',
