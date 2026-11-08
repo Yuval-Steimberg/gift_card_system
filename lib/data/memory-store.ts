@@ -164,7 +164,15 @@ export class MemoryStore implements GiftCardStore {
     }
     if (filter.status) items = items.filter((c) => c.status === filter.status)
     if (filter.templateId) items = items.filter((c) => c.templateId === filter.templateId)
-    items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    // Newest sale first (issuedAt), unpaid checkouts last — mirrors SupabaseStore.
+    items.sort((a, b) => {
+      if (a.issuedAt !== b.issuedAt) {
+        if (!a.issuedAt) return 1
+        if (!b.issuedAt) return -1
+        return a.issuedAt < b.issuedAt ? 1 : -1
+      }
+      return a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+    })
     const total = items.length
     const offset = filter.offset ?? 0
     const limit = filter.limit ?? 50

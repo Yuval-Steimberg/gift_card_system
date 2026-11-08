@@ -143,8 +143,15 @@ export class SupabaseStore implements GiftCardStore {
           `code.ilike.${term},recipient_name.ilike.${term},buyer_name.ilike.${term},buyer_email.ilike.${term},recipient_email.ilike.${term},buyer_phone.ilike.${term},recipient_phone.ilike.${term}`,
         )
       }
-      // `id` breaks created_at ties so consecutive pages never skip or repeat a row.
-      return q.order('created_at', { ascending: false }).order('id', { ascending: false })
+      // Newest SALE first: a card is ordered by when it was paid (issued_at), not
+      // when its checkout started — otherwise a card paid today whose checkout was
+      // opened days ago sits below newer cards and looks missing. Unpaid checkouts
+      // (issued_at NULL) sink to the bottom. `created_at` + `id` break ties so
+      // consecutive pages never skip or repeat a row. Keep in sync with MemoryStore.
+      return q
+        .order('issued_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
     }
     // PostgREST silently caps every response at `max_rows` (1000 on Supabase).
     // The dashboard, reports and CSV export ask for ALL cards, so a single
