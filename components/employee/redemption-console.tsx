@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,7 +10,7 @@ import { Loader, Search } from '@/components/icons'
 import { parseMajorToMinor, formatMoney, toMajor } from '@/lib/money'
 import { lookupCard, performRedemption, type LookupResult, type RedeemResponse } from '@/app/employee/actions'
 
-export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
+export function RedemptionConsole({ allowPartial, initialCode = '' }: { allowPartial: boolean; initialCode?: string }) {
   const [code, setCode] = useState('')
   const [looking, setLooking] = useState(false)
   const [lookup, setLookup] = useState<LookupResult | null>(null)
@@ -24,6 +24,18 @@ export function RedemptionConsole({ allowPartial }: { allowPartial: boolean }) {
   // again" — reuses it, so the server answers 'duplicate' instead of debiting
   // again. A new card or a new amount is a new attempt and gets a new key.
   const attemptRef = useRef<{ fingerprint: string; key: string } | null>(null)
+
+  // A card scanned elsewhere (?code=): look it up once, and take the code out of the address bar so a
+  // scanned recipient link (it carries the card's token) is not left in the browser history. Lookup only:
+  // the amount and the redemption are still the cashier's own taps.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (opened.current || !initialCode) return
+    opened.current = true
+    window.history.replaceState(null, '', window.location.pathname)
+    void doLookup(initialCode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode])
 
   // `keepResult` is used by the post-redemption refresh: re-reading the card must
   // NOT wipe the "הפדיון בוצע בהצלחה · יתרה מעודכנת" banner the cashier just got.
