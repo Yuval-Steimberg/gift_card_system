@@ -10,7 +10,7 @@ import { ROLE_LABEL_HE } from '@/lib/permissions/roles'
 
 export const dynamic = 'force-dynamic'
 
-export default async function EmployeePage() {
+export default async function EmployeePage({ searchParams }: { searchParams?: { code?: string } }) {
   const user = await requireRole(['owner', 'admin', 'store_manager', 'store_employee'])
   const settings = await getSettings()
   const canAdmin = hasPermission(user.role, 'giftcard:suspend') || hasPermission(user.role, 'settings:manage')
@@ -41,7 +41,11 @@ export default async function EmployeePage() {
       <div className="container max-w-lg py-8">
         <h1 className="mb-1 text-2xl">מסך פדיון</h1>
         <p className="mb-6 text-sm text-muted-foreground">סרקו QR או הזינו קוד לפדיון שובר בחנות.</p>
-        <RedemptionConsole allowPartial={settings.allowPartialRedemption} />
+        {/* ?code= = a card scanned elsewhere (the JAS team portal's scan button): looked up on open, never redeemed by itself. */}
+        <RedemptionConsole
+          allowPartial={settings.allowPartialRedemption}
+          initialCode={typeof searchParams?.code === 'string' ? searchParams.code.trim().slice(0, 300) : ''}
+        />
       </div>
     </main>
   )

@@ -96,6 +96,10 @@ Payments: **Grow (Meshulam) via Make.com**. Email: **SendGrid**. Accounting: Gre
   and the equally long period before it, max 366 days. Counts and agorot only. Tests:
   `tests/integration/integration-sales.test.ts`. ⚠️ Tests in a shell that has `NEXT_PUBLIC_SUPABASE_URL` +
   `SUPABASE_SERVICE_ROLE_KEY` exported hit the LIVE store and time out — `env -u` them for `npm test`.
+- **`/employee?code=`** — a card scanned in the JAS team portal (command center `/portal/scan`) opens the redemption
+  screen already looked up (code, recipient link or token; `lookupCard` as usual). Lookup only, never a redemption; the
+  address bar is cleared so a scanned token is not left in history. A signed-out cashier logs in and scans again (login
+  does not carry the code).
 - `app/api/health/route.ts` — diagnostic endpoint (store, tables, admin-query probes, auth probe,
   env flags). Invaluable for debugging deployments.
 
