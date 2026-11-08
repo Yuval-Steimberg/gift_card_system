@@ -140,7 +140,7 @@ export class SupabaseStore implements GiftCardStore {
       if (filter.query) {
         const term = `%${filter.query}%`
         q = q.or(
-          `code.ilike.${term},recipient_name.ilike.${term},buyer_name.ilike.${term},buyer_email.ilike.${term},recipient_email.ilike.${term}`,
+          `code.ilike.${term},recipient_name.ilike.${term},buyer_name.ilike.${term},buyer_email.ilike.${term},recipient_email.ilike.${term},buyer_phone.ilike.${term},recipient_phone.ilike.${term}`,
         )
       }
       // `id` breaks created_at ties so consecutive pages never skip or repeat a row.
